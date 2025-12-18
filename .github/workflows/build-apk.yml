@@ -9,121 +9,121 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Забираем код
-      - uses: actions/checkout@v4
+    # 1. Забираем код
+    - uses: actions/checkout@v4
 
-      # 2. Установка Python 3.9
-      - name: Setup Python 3.9
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    # 2. Установка Python 3.9
+    - name: Setup Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
 
-      # 3. Установка Java 8
-      - name: Setup Java 8
-        run: sudo apt install -y openjdk-8-jdk
+    # 3. Установка Java 17
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
 
-      # 4. Установка системных зависимостей
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3-pip python3-dev git zip unzip tar build-essential \
-            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libpango1.0-dev libharfbuzz-dev wget curl
+    # 4. Установка системных зависимостей
+    - name: Install system dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y python3-pip python3-dev git zip unzip build-essential \
+          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+          libpango1.0-dev libharfbuzz-dev curl wget unzip
 
-      # 5. Установка Buildozer и Kivy
-      - name: Install Buildozer and Kivy
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install buildozer cython==0.29.33 kivy==2.1.0
+    # 5. Установка Buildozer, Cython и Kivy
+    - name: Install Buildozer and Kivy
+      run: |
+        pip install --upgrade pip
+        pip install buildozer cython==0.29.33 kivy==2.1.0
 
-      # 6. Установка Android SDK/NDK и Build-tools
-      - name: Setup Android SDK & NDK
-        run: |
-          export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          cd $ANDROID_SDK_ROOT
+    # 6. Установка Android SDK и NDK
+    - name: Setup Android SDK and NDK
+      run: |
+        export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+        mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+        cd $ANDROID_SDK_ROOT
 
-          # Скачиваем command line tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip
-          mv cmdline-tools latest
-          rm cmdline-tools.zip
+        # Скачиваем Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+        rm -rf cmdline-tools.zip
 
-          # Принимаем лицензии
-          yes | $ANDROID_SDK_ROOT/latest/bin/sdkmanager --licenses
+        # Принимаем лицензии
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
 
-          # Устанавливаем компоненты
-          $ANDROID_SDK_ROOT/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" "ndk;21.4.7075529"
+        # Устанавливаем платформу, build-tools и NDK
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" "ndk;21.4.7075529"
 
-          # Находим установленный NDK
-          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 21.4 | head -1)
-          if [ -z "$NDK_PATH" ]; then
-            echo "❌ NDK не найден!"
-            exit 1
-          fi
-          echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        # Находим путь к NDK
+        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 21.4 | head -1)
+        if [ -z "$NDK_PATH" ]; then
+          echo "❌ NDK не найден!"
+          exit 1
+        fi
 
+        echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
-      # 7. Подготовка приложения
-      - name: Prepare application
-        run: |
-          cat > main.py << 'EOF'
-          from kivy.app import App
-          from kivy.uix.label import Label
+    # 7. Подготовка приложения
+    - name: Prepare application
+      run: |
+        # main.py
+        cat > main.py <<EOF
+        from kivy.app import App
+        from kivy.uix.label import Label
 
-          class TestApp(App):
-              def build(self):
-                  return Label(text="Hello from CI Build!")
+        class TestApp(App):
+            def build(self):
+                return Label(text="Hello from CI Build! Version 1.0")
 
-          if __name__ == '__main__':
-              TestApp().run()
-          EOF
+        if __name__ == '__main__':
+            TestApp().run()
+        EOF
 
-          cat > buildozer.spec << EOF
-          [app]
-          title = TestApp
-          package.name = testapp
-          package.domain = org.example
-          source.dir = .
-          source.include_exts = py,png,jpg,kv,atlas
-          version = 1.0
-          requirements = python3,kivy==2.1.0
-          orientation = portrait
-          android.api = 31
-          android.minapi = 21
-          android.sdk_path = $ANDROID_SDK_ROOT
-          android.ndk_path = $NDK_PATH
-          android.arch = armeabi-v7a
+        # buildozer.spec
+        cat > buildozer.spec <<EOF
+        [app]
+        title = TestApp
+        package.name = testapp
+        package.domain = org.example
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 1.0
+        requirements = python3,kivy==2.1.0
+        orientation = portrait
+        android.api = 31
+        android.minapi = 21
+        android.arch = armeabi-v7a
+        android.sdk_path = $ANDROID_SDK_ROOT
+        android.ndk_path = $NDK_PATH
 
-          [buildozer]
-          log_level = 2
-          warn_on_root = 1
-          android.accept_sdk_license = True
-          EOF
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        android.accept_sdk_license = True
 
-      # 8. Сборка APK
-      - name: Build APK
-        run: |
-          export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          buildozer android debug
+        [android]
+        [android:permissions]
+        android.permission.INTERNET
+        EOF
 
-      # 9. Загрузка APK как артефакт
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: bin/*.apk
-          if-no-files-found: warn
+    # 8. Сборка APK
+    - name: Build APK
+      run: |
+        export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+        export ANDROID_HOME="$ANDROID_SDK_ROOT"
+        buildozer android debug
 
-      # 10. Отладка при ошибке
-      - name: Debug on failure
-        if: failure()
-        run: |
-          echo "=== Debug info ==="
-          ls -la
-          find . -name "*.apk" -type f || echo "No APK files found"
-          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-          echo "NDK_PATH: $NDK_PATH"
-          tail -100 .buildozer/android/platform/build.log 2>/dev/null || echo "Build log not found"
+    # 9. Загрузка APK
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: bin/*.apk
+        if-no-files-found: warn
