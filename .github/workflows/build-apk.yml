@@ -6,46 +6,73 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      # 1. Забираем код
+      # 1. Checkout
       - uses: actions/checkout@v4
 
-      # 2. Настройка Python (локально не используется, но удобно для зависимостей)
-      - name: Setup Python 3.9
-        uses: actions/setup-python@v4
+      # 2. Setup Python 3.9
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3. Сборка APK через Docker Buildozer
-      - name: Build APK (Docker)
+      # 3. Install system dependencies
+      - name: Install dependencies
         run: |
-          echo "=== Запуск Buildozer в Docker ==="
-          docker run --rm \
-            -v ${{ github.workspace }}:/app \
-            -w /app \
-            pybee/buildozer:latest \
-            /bin/bash -c "buildozer android debug"
-          
-      # 4. Загрузка APK как артефакт
+          sudo apt update
+          sudo apt install -y \
+            python3-pip python3-dev git zip unzip build-essential \
+            openjdk-11-jdk zlib1g-dev libncurses5 libncurses5-dev \
+            libffi-dev libssl-dev libsqlite3-dev wget curl
+
+      # 4. Install Buildozer and Kivy
+      - name: Install Buildozer and Kivy
+        run: |
+          pip install --upgrade pip
+          pip install buildozer cython==0.29.33
+          pip install kivy==2.1.0
+
+      # 5. Prepare main.py and buildozer.spec
+      - name: Prepare application
+        run: |
+          echo "from kivy.app import App" > main.py
+          echo "from kivy.uix.label import Label" >> main.py
+          echo "" >> main.py
+          echo "class TestApp(App):" >> main.py
+          echo "    def build(self):" >> main.py
+          echo "        return Label(text='Hello APK')" >> main.py
+          echo "" >> main.py
+          echo "if __name__ == '__main__':" >> main.py
+          echo "    TestApp().run()" >> main.py
+
+          cat > buildozer.spec <<EOF
+          [app]
+          title = TestApp
+          package.name = testapp
+          source.dir = .
+          requirements = python3,kivy==2.1.0
+          android.api = 33
+          android.minapi = 21
+          android.archs = armeabi-v7a
+          android.sdk_path = /usr/local/lib/android/sdk
+          android.ndk_path = /usr/local/lib/android/sdk/ndk/21.3.6528147
+
+          [buildozer]
+          log_level = 2
+          warn_on_root = 1
+          android.accept_sdk_license = True
+          EOF
+
+      # 6. Build APK
+      - name: Build APK
+        run: |
+          buildozer android debug
+
+      # 7. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: apk
           path: bin/*.apk
           if-no-files-found: warn
-
-      # 5. Отладка при ошибке
-      - name: Debug on failure
-        if: failure()
-        run: |
-          echo "=== ОТЛАДКА ==="
-          echo "1. Содержимое проекта:"
-          ls -la
-          echo ""
-          echo "2. Проверка bin/*.apk:"
-          ls -la bin/*.apk 2>/dev/null || echo "APK не создан"
-          echo ""
-          echo "3. Проверка Buildozer версии:"
-          docker run --rm pybee/buildozer:latest buildozer --version
