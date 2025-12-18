@@ -46,24 +46,19 @@ jobs:
         mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
         cd $ANDROID_SDK_ROOT
 
-        # Скачиваем Command Line Tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
         unzip -q cmdline-tools.zip
         mkdir -p cmdline-tools/latest
         mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
         rm -rf cmdline-tools.zip
 
-        # Создаем устаревшую структуру для Buildozer
         mkdir -p tools/bin
         ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $ANDROID_SDK_ROOT/tools/bin/sdkmanager
 
-        # Принимаем лицензии
         yes | $ANDROID_SDK_ROOT/tools/bin/sdkmanager --licenses
 
-        # Устанавливаем платформу, build-tools и NDK
         $ANDROID_SDK_ROOT/tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" "ndk;25.1.8937393"
 
-        # Определяем путь к NDK
         NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 25.1.8937393 | head -1)
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
@@ -97,23 +92,33 @@ jobs:
         android.api = 33
         android.ndk_api = 21
         android.minapi = 21
-        android.archs = armeabi-v7a, arm64-v8a, x86, x86_64
+        android.archs = armeabi-v7a
         android.sdk_path = $ANDROID_SDK_ROOT
         android.ndk_path = $NDK_PATH
 
         [buildozer]
         log_level = 2
         android.accept_sdk_license = True
+        p4a.bootstrap = sdl2
+        p4a.hostpython = python3.9
         EOF
 
-    # 8. Сборка APK
+    # 8. Создаем swap (для надежной сборки)
+    - name: Increase swap
+      run: |
+        sudo fallocate -l 4G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+
+    # 9. Сборка APK
     - name: Build APK
       run: |
         export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
         export ANDROID_HOME="$ANDROID_SDK_ROOT"
         buildozer android debug
 
-    # 9. Загрузка APK
+    # 10. Загрузка APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
