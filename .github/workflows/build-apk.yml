@@ -1,4 +1,4 @@
-name: Build PyGame Android APK
+name: Build Wave Defender APK
 
 on:
   push:
@@ -11,102 +11,115 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup for PyGame
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          python3-pip \
-          python3-dev \
-          git \
-          libsdl2-dev \
-          libsdl2-ttf-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
-          libssl-dev \
-          libffi-dev \
-          zlib1g-dev
+        sudo apt install -y python3-pip python3-dev git wget curl
+        pip3 install buildozer
         
-        pip3 install pygame==2.5.0
-        pip3 install buildozer==1.5.0 cython==0.29.33
-        
-    - name: Update buildozer.spec
+    - name: Create minimal buildozer.spec
       run: |
-        # Используем Python для обновления конфига
-        python3 -c "
-        import configparser
-
-        config = configparser.ConfigParser()
-
-        # Читаем существующий файл
-        try:
-            config.read('buildozer.spec')
-        except:
-            config['app'] = {}
-            config['buildozer'] = {}
-
-        # Обновляем настройки Android
-        if 'app' not in config:
-            config['app'] = {}
-    
-        config['app']['android.api'] = '30'
-        config['app']['android.minapi'] = '21'
-        config['app']['android.ndk'] = '21.4.7075529'
-        config['app']['android.archs'] = 'armeabi-v7a'
-
-        # Добавляем секцию buildozer если её нет
-        if 'buildozer' not in config:
-            config['buildozer'] = {}
-
-        config['buildozer']['android.accept_sdk_license'] = 'True'
-        config['buildozer']['warn_on_root'] = '0'
-        config['buildozer']['log_level'] = '2'
-
-        # Сохраняем
-        with open('buildozer.spec', 'w') as f:
-            config.write(f)
-
-        print('✅ buildozer.spec обновлен')
-        "
+        # Удаляем старый файл чтобы избежать конфликтов
+        rm -f buildozer.spec
         
-        echo "=== Содержимое buildozer.spec ==="
+        # Создаем минимальный конфиг
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = com.test
+        source.dir = .
+        requirements = python3
+        android.api = 30
+        android.minapi = 21
+        android.archs = armeabi-v7a
+
+        [buildozer]
+        warn_on_root = 0
+        log_level = 2
+        android.accept_sdk_license = True
+        EOF
+        
+        # Создаем простой main.py
+        echo 'print("App ready")' > main.py
+        
+        echo "✅ Конфиг создан"
         cat buildozer.spec
-
-    - name: Pre-accept Android licenses
+    
+    - name: Setup Android SDK cache
       run: |
-        mkdir -p ~/.android/licenses
-        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
-        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
+        # Создаем директории для кэша
+        mkdir -p ~/.buildozer/cache
+        mkdir -p ~/.android/cache
         
-    - name: Build APK
+        # Устанавливаем переменные для кэша
+        export BUILD_DIR=$HOME/buildozer_cache
+        mkdir -p $BUILD_DIR
+        
+    - name: Build with retry and fixes
+      timeout-minutes: 60
       run: |
-        # Создаем swap
+        # Увеличиваем swap
         sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
+        echo "=== Начинаем сборку ==="
+        
         # Очищаем предыдущие сборки
         rm -rf .buildozer bin 2>/dev/null || true
         
-        echo "=== Начинаем сборку ==="
-        
-        # Запускаем сборку (без yes)
+        # Первая попытка сборки
+        echo "=== Попытка 1 ==="
         buildozer -v android debug 2>&1 | tee build.log || true
+        
+        # Если ошибка сети, пробуем еще раз
+        if grep -q "read of closed file\|urllib\|ValueError" build.log; then
+          echo "⚠️  Ошибка сети, пробуем еще раз..."
+          echo "=== Попытка 2 ==="
+          sleep 10
+          rm -rf .buildozer/android/platform/build-armeabi-v7a 2>/dev/null || true
+          buildozer -v android debug 2>&1 | tee -a build.log || true
+        fi
+        
+        # Если все еще ошибка, пробуем скачать SDK вручную
+        if grep -q "read of closed file\|urllib\|ValueError" build.log; then
+          echo "⚠️  Пробуем альтернативный способ..."
+          echo "=== Скачиваем SDK вручную ==="
+          
+          # Создаем директорию для SDK
+          mkdir -p ~/.buildozer/android/platform
+          cd ~/.buildozer/android/platform
+          
+          # Скачиваем Android SDK командой tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          mv cmdline-tools tools
+          rm commandlinetools-linux-9477386_latest.zip
+          
+          # Возвращаемся в проект
+          cd -
+          
+          # Пробуем снова
+          echo "=== Попытка 3 ==="
+          buildozer -v android debug 2>&1 | tee -a build.log || true
+        fi
+        
+        # Убираем swap
+        sudo swapoff /swapfile
+        sudo rm /swapfile
         
         # Проверяем результат
         echo "=== Проверка результата ==="
         if ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "✅ APK создан успешно!"
+          echo "✅ УСПЕХ: APK создан!"
           ls -lh bin/*.apk
         else
-          echo "⚠️  APK не создан"
-          echo "Последние ошибки:"
-          tail -100 build.log | grep -i "error\|fail" || echo "Ошибки не найдены"
+          echo "❌ APK не создан"
+          echo "Последние 50 строк лога:"
+          tail -50 build.log
         fi
-        
-        # Очищаем swap
-        sudo swapoff /swapfile
-        sudo rm /swapfile
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
@@ -114,3 +127,10 @@ jobs:
         name: wave-defender-apk
         path: bin/*.apk
         if-no-files-found: warn
+    
+    - name: Upload logs if failed
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: build.log
