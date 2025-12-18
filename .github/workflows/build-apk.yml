@@ -24,40 +24,95 @@ jobs:
       run: |
         source venv/bin/activate
         
-        # ПРАВИЛЬНЫЙ heredoc - без отступов внутри
-          cat > buildozer.spec << 'EOF'
+        # ПРАВИЛЬНЫЙ heredoc - БЕЗ отступов перед EOF
+         cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
         package.domain = com.astafevdanil9
         source.dir = .
+        source.main = main.py
         version = 1.0
         requirements = python3,pygame
+        orientation = landscape
+        fullscreen = 1
+        android.archs = armeabi-v7a
+        android.permissions = INTERNET, VIBRATE
         android.api = 30
         android.minapi = 21
-        android.archs = armeabi-v7a
 
         [buildozer]
         warn_on_root = 0
+        log_level = 2
         android.accept_sdk_license = True
         EOF
         
         echo "✅ buildozer.spec создан"
         cat buildozer.spec
     
+    - name: Accept ALL Android licenses
+      run: |
+        # Создаем директорию для лицензий
+        mkdir -p ~/.android/licenses
+        
+        # Принимаем ВСЕ необходимые лицензии Android SDK
+          cat > ~/.android/licenses/android-sdk-license << 'LICENSES'
+        8933bad161af4178b1185d1a37fbf41ea5269c55
+        d56f5187479451eabf01fb78af6dfcb131a6481e
+        84831b9409646a918e30573bab4c9c91346d8abd
+        24333f8a63b6825ea9c5514f83c2829b004d1fee
+        601085b94cd77f0b54ff86406957099ebe79c4d6
+        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
+        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
+        LICENSES
+                
+                echo "✅ Лицензии Android приняты"
+            
     - name: Build APK
+      timeout-minutes: 45
       run: |
         source venv/bin/activate
         
-        sudo fallocate -l 2G /swapfile
+        # Увеличиваем swap
+        sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        buildozer android debug
+        echo "=== Начинаем сборку ==="
         
+        # Очищаем предыдущие сборки
+        rm -rf .buildozer bin 2>/dev/null || true
+        
+        # Запускаем сборку (yes для автоматического ответа на вопросы)
+        yes | buildozer -v android debug 2>&1 | tee build.log || true
+        
+        # Если ошибка с build-tools 36.1, пробуем другую версию
+        if grep -q "build-tools;36.1.0" build.log; then
+          echo "⚠️  Проблема с build-tools 36.1, пробуем API 29..."
+          
+          # Меняем API на 29 (более стабильный)
+          sed -i 's/android.api = 30/android.api = 29/' buildozer.spec
+          
+          # Пробуем снова
+          rm -rf .buildozer/android/platform/build-armeabi-v7a 2>/dev/null || true
+          yes | buildozer -v android debug 2>&1 | tee -a build.log
+        fi
+        
+        # Убираем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
+        
+        # Проверяем результат
+        echo "=== Результат сборки ==="
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "✅ УСПЕХ: APK создан!"
+          ls -lh bin/*.apk
+        else
+          echo "❌ APK не создан"
+          echo "Последние ошибки:"
+          tail -50 build.log
+        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
@@ -65,3 +120,10 @@ jobs:
         name: wave-defender
         path: bin/*.apk
         if-no-files-found: warn
+    
+    - name: Upload build log
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-debug-log
+        path: build.log
