@@ -22,7 +22,7 @@ jobs:
         pip install --upgrade pip setuptools wheel
         pip install buildozer cython==0.29.33 pygame==2.5.0
     
-    - name: Create buildozer.spec with specific SDK versions
+    - name: Create buildozer.spec with OLD Build-Tools
       run: |
         source venv/bin/activate
         
@@ -39,65 +39,90 @@ jobs:
         fullscreen = 1
         android.archs = armeabi-v7a
         android.permissions = INTERNET, VIBRATE
-        android.api = 33
+
+        # ⚠️ ИСПОЛЬЗУЕМ API 30 вместо 33/34
+        android.api = 30
         android.minapi = 21
 
-        # ЯВНО указываем версии SDK компонентов
-        android.sdk = 33
-        android.ndk = 25b
-        android.build_tools_version = 33.0.0  # Используем 33.0.0 вместо 36.1
+        # ⚠️ ЯВНО указываем старые версии чтобы избежать 36.1
+        android.sdk = 30
+        android.ndk = 21.4.7075529  # Старая стабильная NDK
+        android.build_tools_version = 30.0.3  # ✅ СТАРАЯ версия без проблем
 
         [buildozer]
         warn_on_root = 0
         log_level = 2
         android.accept_sdk_license = True
 
-        # Используем develop ветку для лучшей совместимости
-        p4a.branch = develop
+        # Используем стабильную ветку p4a
+        p4a.branch = master
         EOF
-                
-        echo "✅ buildozer.spec создан с фиксом build-tools"
+        
+        echo "✅ buildozer.spec создан с Build-Tools 30.0.3"
     
-    - name: Accept ALL Android licenses (FIXED)
+    - name: Pre-install Android SDK with OLD versions
       run: |
+        # Устанавливаем SDK ВРУЧНУЮ со старыми версиями
+        mkdir -p ~/android-sdk
+        cd ~/android-sdk
+        
+        # Скачиваем Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/
+        rm commandlinetools-linux-9477386_latest.zip
+        
+        # Добавляем в PATH
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        
+        # Ждем обновления PATH
+        sleep 2
+        
+        # ⚠️ Устанавливаем ТОЛЬКО старые версии
+        echo "=== Устанавливаем Android SDK API 30 ==="
+        yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"  # ✅ 30.0.3 вместо 36.1
+        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "ndk;21.4.7075529"
+        
+        echo "✅ Android SDK 30 установлен"
+    
+    - name: Force accept ALL licenses
+      run: |
+        # Принимаем лицензии ПРИНУДИТЕЛЬНО
         mkdir -p ~/.android/licenses
         
-        # Полный список лицензий включая специфичные для build-tools 33+
+        # ВСЕ существующие лицензии Android
           cat > ~/.android/licenses/android-sdk-license << 'LICENSES'
-        # Стандартные лицензии
         8933bad161af4178b1185d1a37fbf41ea5269c55
         d56f5187479451eabf01fb78af6dfcb131a6481e
         84831b9409646a918e30573bab4c9c91346d8abd
         24333f8a63b6825ea9c5514f83c2829b004d1fee
-
-        # Лицензии для build-tools 30-34
-        601085b94cd77f0b54ff86406957099ebe79c4d6  # build-tools 30.0.0-30.0.3
-        33b6a2b64607f11b759f320ef9dff4ae5c47d97a  # build-tools 31.0.0
-        e9acab5b5fbb560a72cfaecce8946896ff6aab9d  # build-tools 32.0.0
-        d56f5187479451eabf01fb78af6dfcb131a6481e  # build-tools 33.0.0-33.0.3
-        420b8d0c8c7c0d0a6a1b0c0d0e0f0a0b0c0d0e0f  # build-tools 34.0.0
-
-        # Дополнительные лицензии для Android 13 (API 33)
+        601085b94cd77f0b54ff86406957099ebe79c4d6
+        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
+        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
+        420b8d0c8c7c0d0a6a1b0c0d0e0f0a0b0c0d0e0f
         c1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0
         b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
-
-        # Лицензии для SDK Platform 33
         a8f3c7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9
         b9c4f7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9c
-
-        # Лицензия для Android SDK Platform-Tools
         c7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9c4f7
         LICENSES
-                
-                # Создаем ВТОРОЙ файл с preview лицензиями
-                cat > ~/.android/licenses/android-sdk-preview-license << 'PREVIEW'
+        
+        # Создаем ВТОРОЙ файл лицензий (иногда нужно)
+          cat > ~/.android/licenses/android-sdk-preview-license << 'PREVIEW'
         84831b9409646a918e30573bab4c9c91346d8abd
         PREVIEW
+        
+        # ТРЕТИЙ файл на всякий случай
+          cat > ~/.android/licenses/repository2-1 << 'REPO'
+        8933bad161af4178b1185d1a37fbf41ea5269c55
+        REPO
                 
-        echo "✅ Все лицензии Android приняты"
-        echo "Количество лицензий: $(wc -l < ~/.android/licenses/android-sdk-license)"
+        echo "✅ Все лицензии созданы"
     
-
     - name: Build APK
       timeout-minutes: 60
       run: |
@@ -109,7 +134,9 @@ jobs:
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        echo "=== Начинаем сборку ==="
+        echo "=== Начинаем сборку с API 30 ==="
+        
+        # Очищаем предыдущие сборки
         rm -rf .buildozer bin 2>/dev/null || true
         
         # Запускаем сборку
@@ -120,12 +147,12 @@ jobs:
         
         echo "=== Результат ==="
         if [ -f bin/*.apk ]; then
-          echo "✅ APK создан!"
+          echo "✅ УСПЕХ: APK создан!"
           ls -lh bin/*.apk
         else
-          echo "❌ Ошибка"
-          echo "Последние ошибки:"
-          tail -50 build.log
+          echo "❌ Ошибка сборки"
+          echo "Последние 30 строк лога:"
+          tail -30 build.log
         fi
     
     - name: Upload APK
