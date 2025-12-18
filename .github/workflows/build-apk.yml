@@ -1,4 +1,4 @@
-name: Build Android APK Complete
+name: Simple Android Build
 
 on:
   push:
@@ -6,108 +6,87 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Create configuration files
+    - name: Setup environment
       run: |
-        # Создаем main.py если его нет
-        if [ ! -f main.py ]; then
-          cat > main.py << 'EOF'
-        from kivy.app import App
-        from kivy.uix.label import Label
+        sudo apt update
+        sudo apt install -y \
+          python3-pip \
+          python3-dev \
+          build-essential \
+          git \
+          zip \
+          unzip
 
-        class MyApp(App):
-            def build(self):
-                return Label(text="Built on GitHub Actions")
-
-        if __name__ == "__main__":
-            MyApp().run()
-        EOF
-                fi
-        
-        # Создаем правильный buildozer.spec
-        cat > buildozer.spec << 'EOF'
-        [app]
-        title = MyApp
-        package.name = myapp
-        package.domain = org.test
-        source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 1.0
-        requirements = python3,kivy
-        orientation = portrait
-        android.api = 30
-        android.minapi = 21
-        android.archs = armeabi-v7a
-
-        [buildozer]
-        log_level = 2
-        warn_on_root = 0
-
-        # Указываем использовать локальную директорию для .buildozer
-        build_dir = ./.buildozer
-        bin_dir = ./bin
-        EOF
-
-    - name: Build APK with Docker (fixed permissions)
+    - name: Install and configure Buildozer
       run: |
-        # Создаем директории с правильными правами
-        mkdir -p .buildozer bin
-        chmod 777 .buildozer bin
+        # Устанавливаем buildozer
+        pip3 install buildozer
         
-        # Создаем скрипт для запуска внутри контейнера
-        cat > docker_build.sh << 'SCRIPT'
-        #!/bin/bash
-        # Внутри контейнера
+        # Создаем простой main.py
+        echo 'print("Hello Android!")' > main.py
+        
+        # Инициализируем buildozer (автоматически отвечаем на вопросы)
+        echo -e "y\ny" | buildozer init
+        
+        # Обновляем конфигурацию
+        python3 << 'PYTHON'
+        import configparser
+        import os
 
-        # Устанавливаем правильные переменные окружения
-        export HOME=/tmp/home
-        mkdir -p $HOME
+        config = configparser.ConfigParser()
 
-        # Создаем конфиг для buildozer
-        mkdir -p $HOME/.buildozer
-        cat > $HOME/.buildozer/config << 'CONFIG'
-        [buildozer]
-        warn_on_root = 0
-        log_level = 2
-        CONFIG
+        # Создаем новый конфиг
+        config['app'] = {
+            'title': 'MyApp',
+            'package.name': 'myapp',
+            'package.domain': 'org.test',
+            'source.dir': '.',
+            'version': '1.0',
+            'requirements': 'python3',
+            'android.api': '30',
+            'android.minapi': '21',
+            'android.archs': 'armeabi-v7a'
+        }
 
-        # Запускаем сборку
-        cd /app
+        config['buildozer'] = {
+            'log_level': '2',
+            'warn_on_root': '0',
+            'build_dir': './.buildozer',
+            'bin_dir': './bin'
+        }
+
+        # Создаем директории
+        os.makedirs('.buildozer', exist_ok=True)
+        os.makedirs('bin', exist_ok=True)
+
+        # Сохраняем конфиг
+        with open('buildozer.spec', 'w') as f:
+            config.write(f)
+        PYTHON
+
+    - name: Build APK
+      timeout-minutes: 30
+      run: |
+        # Создаем swap для компиляции
+        sudo fallocate -l 2G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        
+        # Собираем APK
         buildozer android debug
-        SCRIPT
-                
-                chmod +x docker_build.sh
         
-        # Запускаем Docker
-        docker run --rm \
-          -v ${{ github.workspace }}:/app:rw \
-          -v /tmp/buildozer_home:/tmp/home:rw \
-          kivy/buildozer \
-          /bin/bash -c "/app/docker_build.sh"
-
-    - name: Check and upload APK
-      run: |
-        echo "Проверяем результаты сборки..."
-        if ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "✅ APK создан успешно!"
-          ls -lh bin/*.apk
-          echo "Размер APK: $(du -h bin/*.apk | cut -f1)"
-        else
-          echo "⚠️  APK не найден в bin/"
-          echo "Ищем во всех директориях..."
-          find . -name "*.apk" 2>/dev/null || echo "APK не найдены"
-          exit 0  # Не завершаем с ошибкой, просто предупреждаем
-        fi
+        # Очищаем swap
+        sudo swapoff /swapfile
+        sudo rm /swapfile
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: android-app
-        path: |
-          bin/*.apk
-          *.apk
-        if-no-files-found: warn
+        name: app-release
+        path: bin/*.apk
