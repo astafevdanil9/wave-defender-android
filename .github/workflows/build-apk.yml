@@ -82,7 +82,35 @@ jobs:
         pip install buildozer==1.5.0 "cython<3.0"
         pip install "kivy[base]" kivy_examples --pre --extra-index-url https://kivy.org/downloads/simple/
         echo "✅ Buildozer и зависимости установлены"
-
+        # 7a. Проверка и установка недостающих JAR файлов
+    - name: Check and install missing JAR files
+      run: |
+        echo "=== Проверка JAR файлов ==="
+        
+        # Проверяем наличие необходимых JAR файлов
+        REQUIRED_JARS=(
+          "cmdline-tools/latest/lib/sdkmanager-classpath.jar"
+          "cmdline-tools/latest/lib/sdk-common.jar"
+          "cmdline-tools/latest/lib/common.jar"
+        )
+        
+        for jar in "${REQUIRED_JARS[@]}"; do
+          if [ ! -f "/usr/local/lib/android/sdk/$jar" ]; then
+            echo "⚠️ Отсутствует: $jar"
+            # Ищем в других местах
+            find /usr/local/lib/android/sdk -name "*.jar" 2>/dev/null | head -5
+          fi
+        done
+        
+        # Если файлов нет, скачиваем полный пакет
+        if [ ! -f "/usr/local/lib/android/sdk/cmdline-tools/latest/lib/sdkmanager-classpath.jar" ]; then
+          echo "Скачиваем полный пакет Command Line Tools..."
+          cd /tmp
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -l commandlinetools-linux-9477386_latest.zip | grep -E "\.jar$"
+          echo "Файлы в архиве проверены"
+        fi      
+        
     # 8. ПРИНЯТИЕ ЛИЦЕНЗИЙ И УСТАНОВКА КОМПОНЕНТОВ
     - name: Accept licenses and install Android components
       run: |
