@@ -50,6 +50,7 @@ jobs:
           [app]
           title = TestApp
           package.name = testapp
+          version = 1.0  
           source.dir = .
           requirements = python3,kivy==2.1.0
           android.api = 33
