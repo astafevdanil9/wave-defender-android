@@ -12,67 +12,83 @@ jobs:
     # 1. Checkout
     - uses: actions/checkout@v4
 
-    # 2. Setup Python
-    - name: Setup Python 3.9
+    # 2. Setup Python 3.9
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    # 3. Setup Java
-    - name: Setup Java 17
+    # 3. Setup Java 17
+    - name: Setup Java
       uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: '17'
 
-    # 4. System dependencies
+    # 4. Install system dependencies
     - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-dev git zip unzip build-essential \
+        sudo apt install -y \
+          python3-pip python3-dev git zip unzip build-essential \
           libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libpango1.0-dev libharfbuzz-dev wget unzip
+          libpango1.0-dev libharfbuzz-dev wget curl libssl-dev libffi-dev \
+          autoconf automake cmake libtool pkg-config zlib1g-dev ccache \
+          libncurses5-dev libgdbm-dev libnss3-dev libreadline-dev libsqlite3-dev
 
-    # 5. Buildozer, Cython, Kivy
+    # 5. Install Buildozer, Cython, Kivy, python-for-android
     - name: Install Buildozer and Kivy
       run: |
-        pip install --upgrade pip
-        pip install buildozer cython==0.29.33 kivy==2.1.0
+        pip install --upgrade pip setuptools wheel
+        pip install buildozer==1.5.0 cython==0.29.36 kivy==2.1.0
+        pip install python-for-android==2023.10.06
 
-    # 6. Android SDK + NDK
+    # 6. Setup Android SDK and NDK
     - name: Install Android SDK and NDK
       run: |
-        export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+        export ANDROID_SDK_ROOT="$HOME/android-sdk"
         mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
         cd $ANDROID_SDK_ROOT
 
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-        unzip -q cmdline-tools.zip
+        # Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        rm commandlinetools-linux-9477386_latest.zip
         mkdir -p cmdline-tools/latest
         mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-        rm -rf cmdline-tools.zip
 
-        mkdir -p tools/bin
-        ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $ANDROID_SDK_ROOT/tools/bin/sdkmanager
+        # Добавляем в PATH
+        echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
 
-        yes | $ANDROID_SDK_ROOT/tools/bin/sdkmanager --licenses
+        # Лицензии и компоненты
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+          "platform-tools" \
+          "platforms;android-33" \
+          "build-tools;33.0.0" \
+          "ndk;25.1.8937393"
 
-        $ANDROID_SDK_ROOT/tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" "ndk;25.1.8937393"
-
-        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 25.1.8937393 | head -1)
+        # Пути к NDK
+        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*25.1*" | head -1)
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
-    # 7. Increase swap (for hostpython compilation)
-    - name: Increase swap
+        # Символическая ссылка для старых Buildozer версий
+        mkdir -p $ANDROID_SDK_ROOT/tools
+        ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin $ANDROID_SDK_ROOT/tools/bin
+
+    # 7. Increase swap for compilation
+    - name: Increase swap space
       run: |
         sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
+        free -h
 
-    # 8. Prepare application
+    # 8. Prepare application files
     - name: Prepare application
       run: |
         cat > main.py <<EOF
@@ -87,40 +103,84 @@ jobs:
             TestApp().run()
         EOF
 
-        cat > buildozer.spec <<EOF
-        [app]
-        title = TestApp
-        package.name = testapp
-        package.domain = org.example
-        source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 1.0
-        requirements = python3,kivy==2.1.0
-        orientation = portrait
-        android.api = 33
-        android.ndk_api = 21
-        android.minapi = 21
-        android.archs = armeabi-v7a
-        android.sdk_path = $ANDROID_SDK_ROOT
-        android.ndk_path = $NDK_PATH
+        # Инициализация Buildozer
+        buildozer init -y
 
-        [buildozer]
-        log_level = 2
-        android.accept_sdk_license = True
-        p4a.hostpython = python3.9
-        EOF
+        # Обновляем buildozer.spec
+        python3 -c "
+        import configparser, os
+        config = configparser.ConfigParser()
+        config.read('buildozer.spec')
+        config['app']['title'] = 'TestApp'
+        config['app']['package.name'] = 'testapp'
+        config['app']['package.domain'] = 'org.example'
+        config['app']['version'] = '1.0'
+        config['app']['requirements'] = 'python3,kivy==2.1.0'
+        config['app']['orientation'] = 'portrait'
+        config['app']['android.api'] = '33'
+        config['app']['android.minapi'] = '21'
+        config['app']['android.archs'] = 'armeabi-v7a'
+        config['app']['android.sdk_path'] = os.environ.get('ANDROID_SDK_ROOT', '')
+        config['app']['android.ndk_path'] = os.environ.get('NDK_PATH', '')
+        config['app']['p4a.hostpython'] = 'python3.9'
+          if 'buildozer' not in config:
+            config['buildozer'] = {}
+            config['buildozer']['log_level'] = '2'
+          with open('buildozer.spec', 'w') as f:
+            config.write(f)
+        "
 
-    # 9. Build APK
+    # 9. Clean previous builds
+    - name: Clean previous builds
+      run: |
+        rm -rf .buildozer bin .gradle
+        buildozer android clean 2>/dev/null || true
+
+    # 10. Build APK
     - name: Build APK
+      timeout-minutes: 30
       run: |
         export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
         export ANDROID_HOME="$ANDROID_SDK_ROOT"
-        buildozer android debug
+        export ANDROID_NDK_HOME="$NDK_PATH"
+        export ANDROID_NDK_ROOT="$NDK_PATH"
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 
-    # 10. Upload APK
+        buildozer -v android debug 2>&1 | tee build.log
+
+    # 11. Check APK
+    - name: Check APK
+      run: |
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ APK успешно создан!"
+          ls -lh bin/*.apk
+        else
+          echo "❌ APK не найден!"
+          tail -50 build.log
+          exit 1
+        fi
+
+    # 12. Remove swap
+    - name: Remove swap
+      if: always()
+      run: |
+        sudo swapoff /swapfile || true
+        sudo rm -f /swapfile || true
+
+    # 13. Upload APK
     - name: Upload APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: android-apk
         path: bin/*.apk
-        if-no-files-found: warn
+        retention-days: 7
+
+    # 14. Upload build log on failure
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        retention-days: 7
