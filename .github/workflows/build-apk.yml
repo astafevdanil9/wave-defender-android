@@ -37,6 +37,7 @@ jobs:
         echo "# Android settings" >> buildozer.spec
         echo "android.api = 33" >> buildozer.spec
         echo "android.minapi = 21" >> buildozer.spec
+        echo "android.accept_sdk_license = True" >> buildozer.spec
         
     - name: Build
       run: |
