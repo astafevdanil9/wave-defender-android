@@ -14,18 +14,17 @@ jobs:
     - name: Setup environment
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-venv
+        sudo apt install -y python3-pip python3-venv python3.9 python3.9-dev python3.9-venv
         
-        python3 -m venv venv
+        python3.9 -m venv venv
         source venv/bin/activate
-        pip install buildozer cython pygame
+        pip install buildozer cython==0.29.33 pygame==2.5.0
     
-    - name: Create buildozer.spec
+    - name: Create buildozer.spec with Python 3.9
       run: |
         source venv/bin/activate
         
-        # ПРАВИЛЬНЫЙ heredoc - БЕЗ отступов перед EOF
-         cat > buildozer.spec << 'EOF'
+          cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
@@ -33,12 +32,12 @@ jobs:
         source.dir = .
         source.main = main.py
         version = 1.0
-        requirements = python3,pygame
+        requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0, sdl2_ttf
         orientation = landscape
         fullscreen = 1
         android.archs = armeabi-v7a
         android.permissions = INTERNET, VIBRATE
-        android.api = 30
+        android.api = 29
         android.minapi = 21
 
         [buildozer]
@@ -47,29 +46,23 @@ jobs:
         android.accept_sdk_license = True
         EOF
         
-        echo "✅ buildozer.spec создан"
+        echo "✅ buildozer.spec создан с Python 3.9.18"
         cat buildozer.spec
     
     - name: Accept ALL Android licenses
       run: |
-        # Создаем директорию для лицензий
         mkdir -p ~/.android/licenses
-        
-        # Принимаем ВСЕ необходимые лицензии Android SDK
           cat > ~/.android/licenses/android-sdk-license << 'LICENSES'
         8933bad161af4178b1185d1a37fbf41ea5269c55
         d56f5187479451eabf01fb78af6dfcb131a6481e
         84831b9409646a918e30573bab4c9c91346d8abd
         24333f8a63b6825ea9c5514f83c2829b004d1fee
-        601085b94cd77f0b54ff86406957099ebe79c4d6
-        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
-        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
         LICENSES
                 
                 echo "✅ Лицензии Android приняты"
             
     - name: Build APK
-      timeout-minutes: 45
+      timeout-minutes: 60
       run: |
         source venv/bin/activate
         
@@ -84,19 +77,15 @@ jobs:
         # Очищаем предыдущие сборки
         rm -rf .buildozer bin 2>/dev/null || true
         
-        # Запускаем сборку (yes для автоматического ответа на вопросы)
-        yes | buildozer -v android debug 2>&1 | tee build.log || true
+        # Запускаем сборку
+        buildozer -v android debug 2>&1 | tee build.log
         
-        # Если ошибка с build-tools 36.1, пробуем другую версию
-        if grep -q "build-tools;36.1.0" build.log; then
-          echo "⚠️  Проблема с build-tools 36.1, пробуем API 29..."
-          
-          # Меняем API на 29 (более стабильный)
-          sed -i 's/android.api = 30/android.api = 29/' buildozer.spec
-          
-          # Пробуем снова
+        # Если ошибка, пробуем без sdl2_ttf
+        if grep -q "longintrepr.h\|error" build.log && [ ! -f bin/*.apk ]; then
+          echo "⚠️  Пробуем без sdl2_ttf..."
+          sed -i 's/requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0, sdl2_ttf/requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0/' buildozer.spec
           rm -rf .buildozer/android/platform/build-armeabi-v7a 2>/dev/null || true
-          yes | buildozer -v android debug 2>&1 | tee -a build.log
+          buildozer -v android debug 2>&1 | tee -a build.log
         fi
         
         # Убираем swap
@@ -106,12 +95,14 @@ jobs:
         # Проверяем результат
         echo "=== Результат сборки ==="
         if ls bin/*.apk 1>/dev/null 2>&1; then
+          APK_FILE=$(ls bin/*.apk | head -1)
           echo "✅ УСПЕХ: APK создан!"
-          ls -lh bin/*.apk
+          echo "Файл: $APK_FILE"
+          echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
         else
           echo "❌ APK не создан"
-          echo "Последние ошибки:"
-          tail -50 build.log
+          echo "=== Ключевые ошибки ==="
+          grep -i "error\|fail\|longintrepr\|cython" build.log | tail -20
         fi
     
     - name: Upload APK
