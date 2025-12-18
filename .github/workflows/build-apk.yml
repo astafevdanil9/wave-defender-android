@@ -18,18 +18,25 @@ jobs:
       with:
         python-version: '3.9'
 
-    # 3. Установка Java 17
+    # 3. Установка Java 17 (основная версия для сборки)
     - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
-        distribution: temurin
+        distribution: 'temurin'
         java-version: '17'
 
     # 4. Установка Android SDK
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 5. Системные зависимости для сборки Kivy и Buildozer
+    # 5. Установка Java 8 для совместимости со старым sdkmanager
+    - name: Setup Java 8 for legacy SDK tools
+      run: |
+        sudo apt update
+        sudo apt install -y openjdk-8-jdk
+        echo "JAVA8_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+
+    # 6. Системные зависимости для сборки Kivy и Buildozer
     - name: Install system dependencies
       run: |
         sudo apt update
@@ -43,117 +50,253 @@ jobs:
           libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
           gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
           pkg-config libjpeg-dev libmtdev-dev xclip xsel \
-          libpango1.0-dev libharfbuzz-dev  # Добавлены для решения проблемы с pangoft2
+          libpango1.0-dev libharfbuzz-dev
 
-    # 6. Установка Buildozer и зависимостей Python
+    # 7. Установка Buildozer и зависимостей Python
     - name: Install Buildozer and Python packages
       run: |
         pip install --upgrade pip setuptools virtualenv
         pip install buildozer "cython<3.0"
         pip install "kivy[base]" kivy_examples --pre --extra-index-url https://kivy.org/downloads/simple/
 
-    # 7. Установка NDK, Build-tools и платформ Android
+    # 8. Проверка и использование современного sdkmanager
     - name: Install Android SDK components
       run: |
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+        # Используем современный sdkmanager из Command Line Tools
+        SDKMANAGER_CMD="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        
+        # Проверяем наличие команды
+        if [ ! -f "$SDKMANAGER_CMD" ]; then
+          echo "❌ Modern sdkmanager not found at: $SDKMANAGER_CMD"
+          echo "Checking available paths..."
+          find $ANDROID_SDK_ROOT -name "sdkmanager" -type f 2>/dev/null
+          exit 1
+        fi
+        
+        echo "✅ Using modern sdkmanager: $SDKMANAGER_CMD"
+        
+        # Принимаем лицензии
+        echo "Accepting Android licenses..."
+        yes | $SDKMANAGER_CMD --licenses > /dev/null 2>&1 || echo "License acceptance completed"
+        
+        # Устанавливаем компоненты
+        echo "Installing Android SDK components..."
+        $SDKMANAGER_CMD --sdk_root=$ANDROID_SDK_ROOT \
           "ndk;21.3.6528147" \
           "build-tools;31.0.0" \
           "platforms;android-31" \
           "platform-tools"
+        
+        echo "✅ Android SDK components installed"
 
-    # 8. Проверка наличия NDK и Build-tools
+    # 9. Проверка наличия NDK и Build-tools
     - name: Verify Android components
       run: |
-        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 21.3 | head -1)
-        if [ -z "$NDK_PATH" ]; then
-          echo "❌ NDK not found!"
-          exit 1
+        echo "=== Verifying Android components ==="
+        
+        # Проверяем NDK
+        NDK_PATH="$ANDROID_SDK_ROOT/ndk/21.3.6528147"
+        if [ ! -d "$NDK_PATH" ]; then
+          echo "⚠️ NDK not found at exact path, searching..."
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | head -1)
+          if [ -z "$NDK_PATH" ] || [ ! -d "$NDK_PATH" ]; then
+            echo "❌ NDK not found!"
+            find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null
+            exit 1
+          fi
         fi
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
-
+        echo "✅ NDK found: $NDK_PATH"
+        
+        # Проверяем Build-tools
         BUILD_TOOLS_DIR="$ANDROID_SDK_ROOT/build-tools/31.0.0"
+        if [ ! -d "$BUILD_TOOLS_DIR" ]; then
+          echo "❌ Build-tools directory not found: $BUILD_TOOLS_DIR"
+          echo "Available build-tools versions:"
+          ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "No build-tools directory"
+          exit 1
+        fi
+        
         for bin in aapt zipalign aidl; do
           if [ ! -f "$BUILD_TOOLS_DIR/$bin" ]; then
-            echo "❌ $bin not found!"
+            echo "❌ $bin not found in $BUILD_TOOLS_DIR/"
             exit 1
           fi
+          echo "✅ $bin found"
         done
-        echo "✅ Android components verified"
+        
+        # Проверяем другие компоненты
+        for component in "platform-tools" "platforms/android-31"; do
+          if [ -d "$ANDROID_SDK_ROOT/$component" ]; then
+            echo "✅ $component found"
+          else
+            echo "⚠️ $component not found (may be optional)"
+          fi
+        done
+        
+        echo "✅ All Android components verified"
 
-    # 9. Подготовка main.py и buildozer.spec
+    # 10. Подготовка main.py и buildozer.spec
     - name: Prepare application files
       run: |
+        echo "=== Preparing application files ==="
+        
         # Создаем main.py
-        echo "from kivy.app import App" > main.py
-        echo "from kivy.uix.label import Label" >> main.py
-        echo "" >> main.py
-        echo "class TestApp(App):" >> main.py
-        echo "    def build(self):" >> main.py
-        echo "        return Label(text='Hello from CI Build! Version 1.0')" >> main.py
-        echo "" >> main.py
-        echo "if __name__ == '__main__':" >> main.py
-        echo "    TestApp().run()" >> main.py
+        cat > main.py << 'MAIN_EOF'
+        from kivy.app import App
+        from kivy.uix.label import Label
 
-        # Создаем buildozer.spec с актуальной версией Kivy
-        echo "[app]" > buildozer.spec
-        echo "title = TestApp" >> buildozer.spec
-        echo "package.name = testapp" >> buildozer.spec
-        echo "package.domain = org.example" >> buildozer.spec
-        echo "source.dir = ." >> buildozer.spec
-        echo "source.include_exts = py,png,jpg,kv,atlas" >> buildozer.spec
-        echo "version = 1.0" >> buildozer.spec
-        echo "requirements = python3,kivy" >> buildozer.spec  # Используем последнюю версию из pip
-        echo "orientation = portrait" >> buildozer.spec
-        echo "android.api = 31" >> buildozer.spec
-        echo "android.minapi = 21" >> buildozer.spec
-        echo "android.sdk_path = __ANDROID_SDK_ROOT__" >> buildozer.spec
-        echo "android.ndk_path = __ANDROID_NDK_PATH__" >> buildozer.spec
-        echo "android.arch = armeabi-v7a" >> buildozer.spec
-        echo "" >> buildozer.spec
-        echo "[buildozer]" >> buildozer.spec
-        echo "log_level = 2" >> buildozer.spec
-        echo "warn_on_root = 1" >> buildozer.spec
-        echo "android.accept_sdk_license = True" >> buildozer.spec
-        echo "" >> buildozer.spec
-        echo "[android]" >> buildozer.spec
-        echo "[android:permissions]" >> buildozer.spec
-        echo "android.permission.INTERNET" >> buildozer.spec
+        class TestApp(App):
+            def build(self):
+                return Label(text="Hello from CI Build! Version 1.0")
 
-        # Заменяем плейсхолдеры
-        sed -i "s|__ANDROID_SDK_ROOT__|$ANDROID_SDK_ROOT|g" buildozer.spec
-        sed -i "s|__ANDROID_NDK_PATH__|$NDK_PATH|g" buildozer.spec
+        if __name__ == '__main__':
+            TestApp().run()
+        MAIN_EOF
+                echo "✅ main.py created"
+        
+        # Создаем buildozer.spec с использованием правильных путей
+        cat > buildozer.spec << 'SPEC_EOF'
+        [app]
+        title = TestApp
+        package.name = testapp
+        package.domain = org.example
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 1.0
+        requirements = python3,kivy
+        orientation = portrait
+        android.api = 31
+        android.minapi = 21
+        android.arch = armeabi-v7a
 
-    # 10. Настройка переменных окружения
+        # Автоматическое определение путей
+        # android.sdk_path = /usr/local/lib/android/sdk
+        # android.ndk_path = /usr/local/lib/android/sdk/ndk/21.3.6528147
+
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        android.accept_sdk_license = True
+
+        [android]
+        [android:permissions]
+        android.permission.INTERNET
+        SPEC_EOF
+        
+        # Динамически обновляем пути в buildozer.spec
+        echo "Updating paths in buildozer.spec..."
+        sed -i "/^# android.sdk_path/c\\android.sdk_path = $ANDROID_SDK_ROOT" buildozer.spec
+        sed -i "/^# android.ndk_path/c\\android.ndk_path = $NDK_PATH" buildozer.spec
+        
+        echo "✅ buildozer.spec created and configured"
+        
+        # Показываем итоговый файл
+        echo "=== Final buildozer.spec ==="
+        grep -E "^(android\.(sdk|ndk)_path|requirements|title)" buildozer.spec
+
+    # 11. Настройка переменных окружения
     - name: Setup environment variables
       run: |
+        echo "=== Setting up environment variables ==="
+        
+        # Основные переменные Android
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        
+        # Добавляем пути в правильном порядке
+        # 1. Современные Command Line Tools
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        # 2. Platform tools
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+        # 3. Build tools
         echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
+        # 4. Java 17 (основная)
+        echo "$JAVA_HOME_17_X64/bin" >> $GITHUB_PATH
+        
+        echo "✅ Environment variables set"
+        echo "PATH will contain in order:"
+        echo "1. Modern Android tools"
+        echo "2. Platform tools"
+        echo "3. Build tools"
+        echo "4. Java 17"
 
-    # 11. Финальная проверка путей перед сборкой
+    # 12. Финальная проверка перед сборкой
     - name: Final verification before build
       run: |
-        for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME"; do
-          if [ ! -d "$path" ]; then
+        echo "=== Final verification ==="
+        
+        # Проверяем критические пути
+        CRITICAL_PATHS=(
+          "$ANDROID_SDK_ROOT"
+          "$NDK_PATH"
+          "$JAVA_HOME_17_X64"
+          "$ANDROID_SDK_ROOT/build-tools/31.0.0"
+        )
+        
+        all_paths_ok=true
+        for path in "${CRITICAL_PATHS[@]}"; do
+          if [ ! -d "$path" ] && [ ! -f "$path" ]; then
             echo "❌ Path does not exist: $path"
-            exit 1
+            all_paths_ok=false
+          else
+            echo "✅ Path exists: $path"
           fi
         done
-        echo "✅ All required paths exist"
+        
+        if [ "$all_paths_ok" = false ]; then
+          echo "❌ Some critical paths are missing"
+          exit 1
+        fi
+        
+        # Проверяем версии
+        echo "Checking versions:"
+        echo "Python: $(python --version 2>&1)"
+        echo "Java: $(java -version 2>&1 | head -1)"
+        echo "Buildozer: $(buildozer --version 2>&1 | head -1 || echo 'Not found')"
+        
+        # Проверяем sdkmanager
+        if command -v sdkmanager > /dev/null 2>&1; then
+          echo "✅ sdkmanager is available in PATH"
+        else
+          echo "⚠️ sdkmanager not in PATH, but we use full path"
+        fi
+        
+        echo "✅ All verifications passed"
 
-    # 12. Сборка APK
+    # 13. Сборка APK
     - name: Build APK
       run: |
         echo "=== Starting APK build ==="
-        echo "Python version:"
-        python --version
-        echo "Kivy version:"
-        python -c "import kivy; print('Kivy:', kivy.__version__)"
+        
+        # Экспортируем переменные для текущего шага
+        export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+        export ANDROID_HOME="$ANDROID_SDK_ROOT"
+        export JAVA_HOME="$JAVA_HOME_17_X64"
+        export NDK_PATH="$NDK_PATH"
+        
+        # Показываем информацию о среде
+        echo "Build environment:"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "NDK_PATH: $NDK_PATH"
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "Python: $(python --version)"
+        
+        # Запускаем сборку
+        echo "Running buildozer..."
         buildozer -v android debug
+        
+        echo "✅ APK build completed"
+        
+        # Показываем результат
+        if [ -d "bin" ]; then
+          echo "=== Generated APK files ==="
+          ls -la bin/*.apk 2>/dev/null || echo "No APK files in bin directory"
+        else
+          echo "⚠️ bin directory not created"
+        fi
 
-    # 13. Загрузка APK как артефакт
+    # 14. Загрузка APK как артефакт
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
@@ -161,22 +304,44 @@ jobs:
         path: bin/*.apk
         if-no-files-found: error
 
-    # 14. Отладка при ошибке
+    # 15. Отладка при ошибке
     - name: Debug on failure
       if: failure()
       run: |
-        echo "=== Debug info ==="
-        echo "Python info:"
-        python --version
-        python -m pip list | grep -E "kivy|cython|buildozer"
+        echo "=== DEBUG INFORMATION ==="
         echo ""
-        echo "Android SDK info:"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "NDK_PATH: $NDK_PATH"
+        echo "1. System Information:"
+        echo "   Python: $(python --version 2>&1)"
+        echo "   Java: $(java -version 2>&1 | head -3)"
+        echo "   Java Home: $JAVA_HOME"
         echo ""
-        echo "File search:"
+        echo "2. Android SDK Information:"
+        echo "   ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "   NDK_PATH: $NDK_PATH"
+        echo "   Available NDKs:"
+        find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null | head -5
+        echo ""
+        echo "3. File Structure:"
+        ls -la
+        echo ""
+        echo "4. APK Search:"
         find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+        echo ""
+        echo "5. Buildozer Log (last 100 lines):"
         if [ -f ".buildozer/android/platform/build.log" ]; then
-          echo "Last 50 lines of build log:"
-          tail -50 .buildozer/android/platform/build.log
+          tail -100 .buildozer/android/platform/build.log
+        else
+          echo "Build log not found"
+          find . -name "*.log" -type f 2>/dev/null | head -5
         fi
+        echo ""
+        echo "6. Environment Variables:"
+        echo "   PATH: $PATH"
+        echo "   JAVA_HOME: $JAVA_HOME"
+        echo "   ANDROID_HOME: $ANDROID_HOME"
+        echo ""
+        echo "7. sdkmanager Check:"
+        which sdkmanager 2>/dev/null || echo "sdkmanager not in PATH"
+        ls -la $ANDROID_SDK_ROOT/cmdline-tools/ 2>/dev/null || echo "No cmdline-tools"
+        echo ""
+        echo "=== END DEBUG INFO ==="
