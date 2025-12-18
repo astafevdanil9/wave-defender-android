@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build with Docker Complete
 
 on:
   push:
@@ -11,61 +11,32 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Prepare configuration
+    - name: Prepare files
       run: |
-        # Создаем минимальное приложение
-        echo 'print("Android App")' > main.py
-        
-        # Создаем правильный buildozer.spec
-        cat > buildozer.spec << 'EOF'
-        [app]
-        title = MyApp
-        package.name = myapp
-        package.domain = org.test
-        source.dir = .
-        version = 1.0
-        requirements = python3
-        orientation = portrait
-        android.api = 30
-        android.minapi = 21
-        android.archs = armeabi-v7a
+        echo 'print("Ready")' > main.py
+        echo '[app]' > buildozer.spec
+        echo 'requirements = python3' >> buildozer.spec
+        echo 'android.api = 30' >> buildozer.spec
+        echo '' >> buildozer.spec
+        echo '[buildozer]' >> buildozer.spec
+        echo 'warn_on_root = 0' >> buildozer.spec
 
-        [buildozer]
-        log_level = 2
-        warn_on_root = 0
-        android.accept_sdk_license = True
-        EOF
-
-    - name: Build with Docker (with all dependencies)
+    - name: Build in Docker
       run: |
         docker run --rm \
           -v $(pwd):/src \
-          -w /src \
-          python:3.9-slim \
+          python:3.9 \
           bash -c "
-          # Устанавливаем ВСЕ необходимые зависимости
+          cd /src && \
           apt-get update && \
-          apt-get install -y \
-            python3-pip \
-            git \
-            zip \
-            unzip \
-            build-essential \
-            libssl-dev \
-            libffi-dev \
-            zlib1g-dev 2>/dev/null
-          
-          # Устанавливаем buildozer
-          pip3 install buildozer 2>/dev/null
-          
-          # Запускаем сборку
-          cd /src
+          apt-get install -y python3-pip git && \
+          pip3 install buildozer cython && \
           buildozer android debug
           "
 
-    - name: Upload APK
+    - name: Upload result
       uses: actions/upload-artifact@v4
       with:
-        name: android-apk
+        name: docker-apk
         path: bin/*.apk
         if-no-files-found: warn
