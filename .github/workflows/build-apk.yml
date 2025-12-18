@@ -1,63 +1,59 @@
-name: Build APK
-
-on: [push, workflow_dispatch]
-
+name: Build Android APK
+on: push
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install everything needed
+    - name: Setup environment
       run: |
         sudo apt update
-        sudo apt install -y \
-          python3-pip \
-          python3-venv \
-          git \
-          zip \
-          unzip \
-          build-essential \
-          openjdk-11-jdk \
-          cython3
-          
-        pip3 install buildozer
-        pip3 install cython
+        sudo apt install -y python3-pip cython3 openjdk-11-jdk
+        pip3 install buildozer cython kivy
         
-    - name: Setup project
+    - name: Create test project
       run: |
-        # Создаем минимальный проект если папка пустая
-        if [ ! -f "main.py" ]; then
-          echo "print('Hello World')" > main.py
-        fi
+        # Create main.py
+        echo "from kivy.app import App" > main.py
+        echo "from kivy.uix.label import Label" >> main.py
+        echo "" >> main.py
+        echo "class MyApp(App):" >> main.py
+        echo "    def build(self):" >> main.py
+        echo "        return Label(text='Test APK')" >> main.py
+        echo "" >> main.py
+        echo "if __name__ == '__main__':" >> main.py
+        echo "    MyApp().run()" >> main.py
         
-        # Инициализируем buildozer
-        buildozer init 2>/dev/null || true
-        
-        # Минимальные настройки
-        echo "requirements = python3" > buildozer.spec
-        echo "" >> buildozer.spec
-        echo "[app]" >> buildozer.spec
-        echo "title = MyApp" >> buildozer.spec
-        echo "package.name = myapp" >> buildozer.spec
+        # Create buildozer.spec
+        echo "[app]" > buildozer.spec
+        echo "title = TestApp" >> buildozer.spec
+        echo "package.name = testapp" >> buildozer.spec
+        echo "package.domain = org.test" >> buildozer.spec
         echo "source.dir = ." >> buildozer.spec
+        echo "version = 1.0" >> buildozer.spec
+        echo "requirements = python3,kivy" >> buildozer.spec
+        echo "" >> buildozer.spec
+        echo "[buildozer]" >> buildozer.spec
+        echo "log_level = 2" >> buildozer.spec
         
-    - name: Build with debug
+    - name: Build APK
       run: |
-        # Разрешаем все лицензии
-        mkdir -p ~/.android
-        touch ~/.android/repositories.cfg
+        echo "Building APK..."
+        buildozer android debug
         
-        # Собираем с детальным выводом
-        buildozer -v android debug 2>&1 | grep -A5 -B5 "error\|Error\|ERROR\|success\|Success" || true
-        
-    - name: Force build even if previous step fails
+    - name: Verify and upload APK
       run: |
-        # Пытаемся собрать любой ценой
-        buildozer android debug || echo "Build completed"
+        echo "Checking for APK file..."
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "APK found!"
+          ls -lh bin/*.apk
+        else
+          echo "Looking for APK..."
+          find . -type f -name "*.apk" | head -5
+        fi
         
     - uses: actions/upload-artifact@v4
       with:
-        name: myapp-apk
-        path: bin/*.apk 2>/dev/null || .
+        name: android-app
+        path: bin/*.apk
