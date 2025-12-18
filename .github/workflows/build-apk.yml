@@ -28,9 +28,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
-            python3.10 \
-            python3.10-venv \
-            python3.10-dev \
             python3-pip \
             python3-setuptools \
             python3-wheel \
@@ -39,20 +36,21 @@ jobs:
             unzip \
             libffi-dev \
             libssl-dev \
-            cython3 \
             build-essential \
-            zlib1g-dev
+            zlib1g-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev
 
-      # 5. Установка Buildozer и зависимостей Python
-      - name: Install Buildozer
+      # 5. Установка Python-пакетов и Buildozer в виртуальном окружении
+      - name: Install Buildozer and Python dependencies
         run: |
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
-          python3 --version
-          pip3 install --upgrade pip
-          pip3 install cython==0.29.33
-          pip3 install virtualenv
-          pip3 install buildozer
-          pip3 install kivy==2.1.0
+          python3 -m pip install --upgrade pip
+          python3 -m pip install virtualenv
+          python3 -m virtualenv venv
+          source venv/bin/activate
+          pip install cython==0.29.33
+          pip install buildozer
+          pip install kivy==2.1.0
 
       # 6. Установка NDK, Build-tools и платформ Android
       - name: Install Android SDK components
@@ -97,7 +95,7 @@ jobs:
       - name: Prepare application files
         run: |
           # main.py
-          cat > main.py <<'EOF'
+          cat > main.py <<'MAINEOF'
           from kivy.app import App
           from kivy.uix.label import Label
 
@@ -107,10 +105,10 @@ jobs:
 
           if __name__ == '__main__':
               TestApp().run()
-          EOF
+          MAINEOF
 
           # buildozer.spec
-          cat > buildozer.spec <<'EOF'
+          cat > buildozer.spec <<'SPECEOF'
           [app]
           title = TestApp
           package.name = testapp
@@ -134,19 +132,20 @@ jobs:
           [android]
           [android:permissions]
           android.permission.INTERNET
-          EOF
+          SPECEOF
 
           # Подставляем реальные пути
-          sed -i "s|__ANDROID_SDK_ROOT__|${ANDROID_SDK_ROOT}|g" buildozer.spec
-          sed -i "s|__ANDROID_NDK_PATH__|${NDK_PATH}|g" buildozer.spec
+          sed -i "s|__ANDROID_SDK_ROOT__|$ANDROID_SDK_ROOT|g" buildozer.spec
+          sed -i "s|__ANDROID_NDK_PATH__|$NDK_PATH|g" buildozer.spec
 
-          echo "main.py and buildozer.spec prepared"
+          echo "✅ main.py and buildozer.spec prepared"
 
       # 9. Настройка переменных окружения
       - name: Setup environment variables
         run: |
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
           echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
@@ -154,7 +153,7 @@ jobs:
       # 10. Финальная проверка путей перед сборкой
       - name: Final verification before build
         run: |
-          for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$(which python3)"; do
+          for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME"; do
             if [ ! -d "$path" ]; then
               echo "❌ Path does not exist: $path"
               exit 1
@@ -165,6 +164,7 @@ jobs:
       # 11. Сборка APK
       - name: Build APK
         run: |
+          source venv/bin/activate
           buildozer -v android debug
 
       # 12. Загрузка APK как артефакт
@@ -184,7 +184,7 @@ jobs:
           find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
           echo "NDK_PATH: $NDK_PATH"
-          echo "Python: $(python3 --version)"
+          echo "JAVA_HOME: $JAVA_HOME"
 
           if [ -f ".buildozer/android/platform/build.log" ]; then
             echo "=== Last 100 lines of Buildozer log ==="
