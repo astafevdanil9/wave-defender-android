@@ -33,40 +33,40 @@ jobs:
       run: |
         # Используем Python для обновления конфига
         python3 -c "
-import configparser
+        import configparser
 
-config = configparser.ConfigParser()
+        config = configparser.ConfigParser()
 
-# Читаем существующий файл
-try:
-    config.read('buildozer.spec')
-except:
-    config['app'] = {}
-    config['buildozer'] = {}
+        # Читаем существующий файл
+        try:
+            config.read('buildozer.spec')
+        except:
+            config['app'] = {}
+            config['buildozer'] = {}
 
-# Обновляем настройки Android
-if 'app' not in config:
-    config['app'] = {}
+        # Обновляем настройки Android
+        if 'app' not in config:
+            config['app'] = {}
     
-config['app']['android.api'] = '30'
-config['app']['android.minapi'] = '21'
-config['app']['android.ndk'] = '21.4.7075529'
-config['app']['android.archs'] = 'armeabi-v7a'
+        config['app']['android.api'] = '30'
+        config['app']['android.minapi'] = '21'
+        config['app']['android.ndk'] = '21.4.7075529'
+        config['app']['android.archs'] = 'armeabi-v7a'
 
-# Добавляем секцию buildozer если её нет
-if 'buildozer' not in config:
-    config['buildozer'] = {}
+        # Добавляем секцию buildozer если её нет
+        if 'buildozer' not in config:
+            config['buildozer'] = {}
 
-config['buildozer']['android.accept_sdk_license'] = 'True'
-config['buildozer']['warn_on_root'] = '0'
-config['buildozer']['log_level'] = '2'
+        config['buildozer']['android.accept_sdk_license'] = 'True'
+        config['buildozer']['warn_on_root'] = '0'
+        config['buildozer']['log_level'] = '2'
 
-# Сохраняем
-with open('buildozer.spec', 'w') as f:
-    config.write(f)
+        # Сохраняем
+        with open('buildozer.spec', 'w') as f:
+            config.write(f)
 
-print('✅ buildozer.spec обновлен')
-"
+        print('✅ buildozer.spec обновлен')
+        "
         
         echo "=== Содержимое buildozer.spec ==="
         cat buildozer.spec
