@@ -13,43 +13,48 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Cache Android NDK and SDK
-      uses: actions/cache@v3
-      id: ndk-cache
-      with:
-        path: |
-          ~/.buildozer/android/platform
-          ~/.buildozer/cache
-        key: ${{ runner.os }}-android-ndk-sdk-25b
-        
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        
-    - name: Install system dependencies
+    - name: Install ALL Android tools via apt
       run: |
         sudo apt-get update
+        
+        # Установка ВСЕХ Android инструментов
         sudo apt-get install -y \
+          # Основные инструменты Android
+          android-sdk \
+          android-sdk-platform-31 \
+          android-sdk-platform-30 \
+          android-sdk-build-tools-31.0.0 \
+          android-sdk-build-tools-30.0.3 \
+          android-sdk-ndk \
+          android-sdk-cmake \
+          # Конкретные инструменты
+          aidl \
+          aapt \
+          zipalign \
+          apksigner \
+          # Java
+          openjdk-17-jdk \
+          # Python и зависимости
           python3-pip \
           python3-venv \
           build-essential \
           git \
           zip \
           unzip \
-          curl \
-          wget \
-          openjdk-17-jdk \
-          autoconf \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libffi-dev \
-          libssl-dev \
+          # SDL2 для pygame
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
           libsdl2-ttf-dev
+        
+        # Настраиваем переменные
+        echo "ANDROID_SDK_ROOT=/usr/lib/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=/usr/lib/android-sdk" >> $GITHUB_ENV
+        
+        # Проверяем установку
+        which aidl
+        which aapt
+        ls -la /usr/lib/android-sdk/build-tools/
         
     - name: Install Buildozer
       run: |
@@ -57,8 +62,6 @@ jobs:
         
     - name: Build APK
       run: |
-        # Если кэш не найден, Buildozer скачает сам
-        # Если кэш найден - использует готовые файлы
         buildozer -v android debug
         
     - name: Upload APK
