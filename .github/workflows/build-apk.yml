@@ -7,84 +7,60 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # Используем стабильную версию
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Установка системных зависимостей
+    - name: Установка ВСЕХ зависимостей через apt
       run: |
         sudo apt-get update
+        
+        # Установка Android SDK и инструментов
         sudo apt-get install -y \
+          # Android SDK
+          android-sdk \
+          android-sdk-platform-31 \
+          android-sdk-build-tools-31.0.0 \
+          android-sdk-ndk \
+          # Конкретные инструменты
+          aidl \
+          aapt \
+          zipalign \
+          # Java
+          openjdk-17-jdk \
+          # Python и Buildozer
           python3-pip \
           python3-venv \
+          buildozer \
+          cython3 \
+          # Системные зависимости
           build-essential \
           git \
           zip \
           unzip \
-          curl \
-          wget \
-          openjdk-17-jdk \
-          autoconf \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libffi-dev \
-          libssl-dev \
+          # SDL2 для pygame
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
           libsdl2-ttf-dev
         
-    - name: Установка Android SDK и NDK (без sdkmanager)
+        # Настраиваем переменные
+        echo "ANDROID_HOME=/usr/lib/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=/usr/lib/android-sdk" >> $GITHUB_ENV
+        
+        # Проверяем что всё установлено
+        echo "Проверка установки:"
+        which aidl && echo "✅ AIDL найден"
+        which aapt && echo "✅ AAPT найден"
+        ls -la /usr/lib/android-sdk/build-tools/ | head -5
+        
+    - name: Сборка APK
       run: |
-        # 1. Создаём папку
-        mkdir -p ~/android-sdk
+        buildozer -v android debug
         
-        # 2. Скачиваем и устанавливаем Platform Tools напрямую
-        cd ~/android-sdk
-        wget -q https://dl.google.com/android/repository/platform-tools-latest-linux.zip
-        unzip -q platform-tools-latest-linux.zip
-        rm platform-tools-latest-linux.zip
-        
-        # 3. Скачиваем Build Tools 31.0.0 напрямую (содержит aidl)
-        wget -q https://dl.google.com/android/repository/build-tools_r31.0.0-linux.zip
-        mkdir -p build-tools
-        unzip -q build-tools_r31.0.0-linux.zip -d build-tools/31.0.0
-        rm build-tools_r31.0.0-linux.zip
-        
-        # 4. Скачиваем NDK напрямую
-        wget -q https://dl.google.com/android/repository/android-ndk-r25.2.9519653-linux.zip
-        unzip -q android-ndk-r25.2.9519653-linux.zip
-        rm android-ndk-r25.2.9519653-linux.zip
-        
-        # 5. Настраиваем переменные окружения
-        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=~/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=~/android-sdk/android-ndk-r25.2.9519653" >> $GITHUB_ENV
-        echo "PATH=~/android-sdk/platform-tools:~/android-sdk/build-tools/31.0.0:$PATH" >> $GITHUB_ENV
-        
-        # 6. Проверяем установку
-        ls -la ~/android-sdk/
-        ~/android-sdk/build-tools/31.0.0/aidl --version || echo "AIDL проверка..."
-        
-    - name: Install Buildozer and dependencies
-      run: |
-        pip install buildozer cython
-        # Устанавливаем зависимости для python-for-android заранее
-        pip install appdirs colorama>=0.3.3 jinja2 toml packaging setuptools sh
-        
-    - name: Build APK with Buildozer
-      run: |
-        # Явно указываем пути для Buildozer
-        export ANDROID_SDK_ROOT=~/android-sdk
-        export ANDROID_NDK_HOME=~/android-sdk/android-ndk-r25.2.9519653
-        
-        # Запускаем сборку с пропуском загрузки SDK
-        buildozer -v android debug 2>&1 | tee build.log
-        
-    - name: Upload APK
+    - name: Загрузка APK
       uses: actions/upload-artifact@v4
       with:
         name: wave-defender-apk
