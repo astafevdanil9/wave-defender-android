@@ -1,7 +1,7 @@
 [app]
 title = Wave Defender
 package.name = wavedefender
-package.domain = com.gamedev
+package.domain = com.astafevdanil9
 source.dir = .
 source.main = main.py
 version = 1.0
@@ -12,3 +12,8 @@ android.api = 31
 android.minapi = 21
 android.archs = arm64-v8a
 android.permissions = INTERNET, VIBRATE
+android.sdk = 31
+android.ndk = 25.2.9519653
+
+[buildozer]
+log_level = 2

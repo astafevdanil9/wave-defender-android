@@ -23,12 +23,16 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           python3-pip \
+          python3-venv \
           build-essential \
           git \
           zip \
           unzip \
+          curl \
+          wget \
           openjdk-17-jdk \
           autoconf \
+          automake \
           libtool \
           pkg-config \
           zlib1g-dev \
@@ -37,33 +41,67 @@ jobs:
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
-          libsdl2-ttf-dev
+          libsdl2-ttf-dev \
+          libxml2-dev \
+          libxslt1-dev \
+          cmake \
+          ninja-build \
+          ccache
         
-    - name: Install Android SDK and Build Tools
+    - name: Install Android SDK and NDK
       run: |
-        # Установка в домашнюю директорию (не требует sudo)
-        cd ~
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        mkdir -p android-sdk/cmdline-tools
-        unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/cmdline-tools
-        mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
+        # Установка Android SDK
+        cd /usr/local/lib
+        sudo wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        sudo unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk
+        sudo mv android-sdk/cmdline-tools android-sdk/tools
         
         # Настройка переменных окружения
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
+        echo "ANDROID_SDK_ROOT=/usr/local/lib/android-sdk" | sudo tee -a /etc/environment
+        echo "ANDROID_HOME=/usr/local/lib/android-sdk" | sudo tee -a /etc/environment
+        echo "ANDROID_NDK_HOME=/usr/local/lib/android-sdk/ndk/25.2.9519653" | sudo tee -a /etc/environment
         
-        # Принятие лицензий и установка компонентов
-        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+        # Добавление в PATH для текущего процесса
+        export ANDROID_SDK_ROOT=/usr/local/lib/android-sdk
+        export ANDROID_HOME=/usr/local/lib/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools
         
-    - name: Install Buildozer and Cython
+        # Принятие лицензий (неинтерактивный режим)
+        yes | sudo $ANDROID_SDK_ROOT/tools/bin/sdkmanager --licenses
+        
+        # Установка ВСЕХ необходимых компонентов для Buildozer
+        sudo $ANDROID_SDK_ROOT/tools/bin/sdkmanager \
+          "platform-tools" \
+          "platforms;android-31" \
+          "platforms;android-30" \
+          "build-tools;31.0.0" \
+          "build-tools;30.0.3" \
+          "ndk;25.2.9519653" \
+          "cmake;3.22.1" \
+          "patcher;v4"
+        
+        # Проверка установки
+        ls -la $ANDROID_SDK_ROOT
+        which aidl
+        which aapt
+        which zipalign
+        
+    - name: Install Buildozer and dependencies
       run: |
-        pip install buildozer cython
+        pip install --upgrade pip setuptools wheel
+        pip install buildozer cython==0.29.36 virtualenv
         
-    - name: Build APK
+    - name: Build APK with Buildozer
       run: |
+        # Очистка предыдущих сборок
+        buildozer android clean || true
+        
+        # Инициализация если нужно
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
+        fi
+        
+        # Сборка APK
         buildozer -v android debug
         
     - name: Upload APK
@@ -71,3 +109,4 @@ jobs:
       with:
         name: wave-defender-apk
         path: bin/*.apk
+        retention-days: 7
