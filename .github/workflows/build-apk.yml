@@ -1,4 +1,4 @@
-name: Build Wave Defender APK
+name: Let Buildozer Download Everything
 
 on:
   push:
@@ -11,153 +11,41 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup environment
+    - name: Setup
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-venv python3-dev
-        
-        python3 -m venv venv
-        source venv/bin/activate
-        
-        pip install --upgrade pip setuptools wheel
-        pip install buildozer cython==0.29.33 pygame==2.5.0
+        sudo apt install -y python3-pip
+        pip3 install buildozer
     
-    - name: Create buildozer.spec with OLD Build-Tools
+    - name: Create minimal spec
       run: |
-        source venv/bin/activate
-        
+        # Минимальный конфиг - buildozer сам скачает нужные версии
           cat > buildozer.spec << 'EOF'
         [app]
-        title = Wave Defender
-        package.name = wavedefender
-        package.domain = com.astafevdanil9
+        title = App
+        package.name = app
+        package.domain = org.test
         source.dir = .
-        source.main = main.py
         version = 1.0
-        requirements = python3, pygame==2.5.0
-        orientation = landscape
-        fullscreen = 1
-        android.archs = armeabi-v7a
-        android.permissions = INTERNET, VIBRATE
-
-        # ⚠️ ИСПОЛЬЗУЕМ API 30 вместо 33/34
+        requirements = python3
         android.api = 30
         android.minapi = 21
-
-        # ⚠️ ЯВНО указываем старые версии чтобы избежать 36.1
-        android.sdk = 30
-        android.ndk = 21.4.7075529  # Старая стабильная NDK
-        android.build_tools_version = 30.0.3  # ✅ СТАРАЯ версия без проблем
+        android.archs = armeabi-v7a
 
         [buildozer]
         warn_on_root = 0
         log_level = 2
         android.accept_sdk_license = True
-
-        # Используем стабильную ветку p4a
-        p4a.branch = master
         EOF
-        
-        echo "✅ buildozer.spec создан с Build-Tools 30.0.3"
-    
-    - name: Pre-install Android SDK with OLD versions
-      run: |
-        # Устанавливаем SDK ВРУЧНУЮ со старыми версиями
-        mkdir -p ~/android-sdk
-        cd ~/android-sdk
-        
-        # Скачиваем Command Line Tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/
-        rm commandlinetools-linux-9477386_latest.zip
-        
-        # Добавляем в PATH
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        
-        # Ждем обновления PATH
-        sleep 2
-        
-        # ⚠️ Устанавливаем ТОЛЬКО старые версии
-        echo "=== Устанавливаем Android SDK API 30 ==="
-        yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"  # ✅ 30.0.3 вместо 36.1
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "ndk;21.4.7075529"
-        
-        echo "✅ Android SDK 30 установлен"
-    
-    - name: Force accept ALL licenses
-      run: |
-        # Принимаем лицензии ПРИНУДИТЕЛЬНО
-        mkdir -p ~/.android/licenses
-        
-        # ВСЕ существующие лицензии Android
-          cat > ~/.android/licenses/android-sdk-license << 'LICENSES'
-        8933bad161af4178b1185d1a37fbf41ea5269c55
-        d56f5187479451eabf01fb78af6dfcb131a6481e
-        84831b9409646a918e30573bab4c9c91346d8abd
-        24333f8a63b6825ea9c5514f83c2829b004d1fee
-        601085b94cd77f0b54ff86406957099ebe79c4d6
-        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
-        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
-        420b8d0c8c7c0d0a6a1b0c0d0e0f0a0b0c0d0e0f
-        c1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0
-        b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
-        a8f3c7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9
-        b9c4f7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9c
-        c7d2e1b6a9c4f7d2e1b6a9c4f7d2e1b6a9c4f7
-        LICENSES
-        
-        # Создаем ВТОРОЙ файл лицензий (иногда нужно)
-          cat > ~/.android/licenses/android-sdk-preview-license << 'PREVIEW'
-        84831b9409646a918e30573bab4c9c91346d8abd
-        PREVIEW
-        
-        # ТРЕТИЙ файл на всякий случай
-          cat > ~/.android/licenses/repository2-1 << 'REPO'
-        8933bad161af4178b1185d1a37fbf41ea5269c55
-        REPO
                 
-        echo "✅ Все лицензии созданы"
+        echo 'print("Hello")' > main.py
     
-    - name: Build APK
-      timeout-minutes: 60
+    - name: Build with auto-download
       run: |
-        source venv/bin/activate
-        
-        # Увеличиваем swap
-        sudo fallocate -l 4G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        
-        echo "=== Начинаем сборку с API 30 ==="
-        
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
-        
-        # Запускаем сборку
-        buildozer -v android debug 2>&1 | tee build.log
-        
-        sudo swapoff /swapfile
-        sudo rm /swapfile
-        
-        echo "=== Результат ==="
-        if [ -f bin/*.apk ]; then
-          echo "✅ УСПЕХ: APK создан!"
-          ls -lh bin/*.apk
-        else
-          echo "❌ Ошибка сборки"
-          echo "Последние 30 строк лога:"
-          tail -30 build.log
-        fi
+        # Buildozer сам скачает SDK с правильными версиями
+        buildozer android debug 2>&1 | tail -50
     
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: wave-defender
+        name: apk-result
         path: bin/*.apk
-        if-no-files-found: warn
