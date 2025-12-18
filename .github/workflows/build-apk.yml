@@ -13,48 +13,67 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Install ALL Android tools via apt
+    - name: Установка системных зависимостей
       run: |
         sudo apt-get update
-        
-        # Установка ВСЕХ Android инструментов
         sudo apt-get install -y \
-          # Основные инструменты Android
-          android-sdk \
-          android-sdk-platform-31 \
-          android-sdk-platform-30 \
-          android-sdk-build-tools-31.0.0 \
-          android-sdk-build-tools-30.0.3 \
-          android-sdk-ndk \
-          android-sdk-cmake \
-          # Конкретные инструменты
-          aidl \
-          aapt \
-          zipalign \
-          apksigner \
-          # Java
-          openjdk-17-jdk \
-          # Python и зависимости
           python3-pip \
           python3-venv \
           build-essential \
           git \
           zip \
           unzip \
-          # SDL2 для pygame
+          curl \
+          wget \
+          openjdk-17-jdk \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libffi-dev \
+          libssl-dev \
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
           libsdl2-ttf-dev
         
-        # Настраиваем переменные
-        echo "ANDROID_SDK_ROOT=/usr/lib/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=/usr/lib/android-sdk" >> $GITHUB_ENV
+    - name: Установка Android SDK и NDK
+      run: |
+        # 1. Создаём папку и скачиваем инструменты командной строки
+        mkdir -p ~/android-sdk
+        cd ~
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mkdir -p android-sdk/cmdline-tools/latest
+        mv cmdline-tools/* android-sdk/cmdline-tools/latest/
+        rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
         
-        # Проверяем установку
+        # 2. Настраиваем переменные окружения
+        export ANDROID_SDK_ROOT=~/android-sdk
+        export ANDROID_HOME=~/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+        
+        # 3. Принимаем лицензии и устанавливаем компоненты
+        #    Используем ПОЛНЫЙ ПУТЬ к sdkmanager!
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+          "platform-tools" \
+          "platforms;android-31" \
+          "platforms;android-30" \
+          "build-tools;31.0.0" \
+          "build-tools;30.0.3" \
+          "ndk;25.2.9519653"
+        
+        # 4. Сохраняем переменные для следующих шагов
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "PATH=$PATH" >> $GITHUB_ENV
+        
+        # 5. Проверяем установку
         which aidl
         which aapt
-        ls -la /usr/lib/android-sdk/build-tools/
+        ls -la ~/android-sdk/build-tools/
         
     - name: Install Buildozer
       run: |
