@@ -1,0 +1,11 @@
+# Buildozer
+.bin/
+.buildozer/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Game saves
+game_save.json
