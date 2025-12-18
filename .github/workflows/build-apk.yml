@@ -11,16 +11,82 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Prepare buildozer.spec
+      run: |
+        # Создаем buildozer.spec если его нет
+        if [ ! -f buildozer.spec ]; then
+          echo '[app]' > buildozer.spec
+          echo 'title = MyApp' >> buildozer.spec
+          echo 'package.name = myapp' >> buildozer.spec
+          echo 'package.domain = org.test' >> buildozer.spec
+          echo 'source.dir = .' >> buildozer.spec
+          echo 'version = 1.0' >> buildozer.spec
+          echo 'requirements = python3,kivy' >> buildozer.spec
+          echo 'orientation = portrait' >> buildozer.spec
+          echo 'android.api = 30' >> buildozer.spec
+          echo 'android.minapi = 21' >> buildozer.spec
+          echo 'android.archs = armeabi-v7a' >> buildozer.spec
+          echo '' >> buildozer.spec
+          echo '[buildozer]' >> buildozer.spec
+          echo 'log_level = 2' >> buildozer.spec
+          echo 'warn_on_root = 0' >> buildozer.spec
+        else
+          # Добавляем или обновляем настройку warn_on_root
+          if grep -q "\[buildozer\]" buildozer.spec; then
+            # Если секция [buildozer] существует
+            if grep -q "warn_on_root" buildozer.spec; then
+              sed -i 's/^warn_on_root.*/warn_on_root = 0/' buildozer.spec
+            else
+              sed -i '/\[buildozer\]/a warn_on_root = 0' buildozer.spec
+            fi
+          else
+            # Если секции [buildozer] нет, добавляем ее
+            echo '' >> buildozer.spec
+            echo '[buildozer]' >> buildozer.spec
+            echo 'log_level = 2' >> buildozer.spec
+            echo 'warn_on_root = 0' >> buildozer.spec
+          fi
+        fi
+        
+        # Создаем main.py если его нет
+        if [ ! -f main.py ]; then
+          echo 'from kivy.app import App' > main.py
+          echo 'from kivy.uix.label import Label' >> main.py
+          echo '' >> main.py
+          echo 'class MyApp(App):' >> main.py
+          echo '    def build(self):' >> main.py
+          echo '        return Label(text="Hello from Docker Build!")' >> main.py
+          echo '' >> main.py
+          echo 'if __name__ == "__main__":' >> main.py
+          echo '    MyApp().run()' >> main.py
+        fi
+
     - name: Build with Docker
       run: |
-        docker run --rm \
+        # Используем echo "y" для автоматического ответа на запрос buildozer
+        echo "y" | docker run --rm \
           -v ${{ github.workspace }}:/app \
           -v buildozer_cache:/home/user/.buildozer \
           -v android_cache:/home/user/.android \
           kivy/buildozer \
           buildozer android debug
         
+    - name: Check and upload APK
+      run: |
+        # Проверяем, создан ли APK
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ APK успешно создан!"
+          ls -lh bin/*.apk
+        else
+          echo "❌ APK не найден"
+          echo "Ищем другие файлы APK..."
+          find . -name "*.apk" 2>/dev/null || echo "APK файлы не найдены"
+          exit 1
+        fi
+
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: android-apk
+        path: bin/*.apk
+        if-no-files-found: error
