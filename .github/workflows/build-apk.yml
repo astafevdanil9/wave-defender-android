@@ -14,10 +14,10 @@ jobs:
     - name: Build with Docker
       run: |
         docker run --rm \
-          -v $(pwd):/app \
-          -v ~/.buildozer:/home/user/.buildozer \
-          -v ~/.android:/home/user/.android \
-          jgallagher/ubuntu-buildozer \
+          -v ${{ github.workspace }}:/app \
+          -v buildozer_cache:/home/user/.buildozer \
+          -v android_cache:/home/user/.android \
+          kivy/buildozer \
           buildozer android debug
         
     - name: Upload APK
