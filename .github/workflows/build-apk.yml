@@ -12,111 +12,77 @@ jobs:
       # 1. Забираем код
       - uses: actions/checkout@v4
 
-      # 2. Установка Java 17
+      # 2. Установка Python 3.11
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      # 3. Установка Java 17
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Установка Android SDK
+      # 4. Установка Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 4. Системные зависимости
+      # 5. Системные зависимости для сборки Kivy и Buildozer
       - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install -y \
-            python3-pip \
-            python3-setuptools \
-            python3-wheel \
-            python3-dev \
-            git \
-            zip \
-            unzip \
-            libffi-dev \
-            libssl-dev \
-            build-essential \
-            zlib1g-dev \
-            libgl1-mesa-dev \
-            libgles2-mesa-dev \
-            libgstreamer1.0-dev \
-            gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad \
-            gstreamer1.0-plugins-ugly \
-            gstreamer1.0-libav \
-            pkg-config \
-            libmtdev-dev \
-            xclip \
-            xsel \
-            libjpeg-dev \
-            libsdl2-dev \
-            libsdl2-image-dev \
-            libsdl2-mixer-dev \
-            libsdl2-ttf-dev \
+            python3-dev python3-pip python3-setuptools python3-wheel \
+            build-essential git zip unzip \
+            libffi-dev libssl-dev zlib1g-dev \
+            libgl1-mesa-dev libgles2-mesa-dev \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
             libportmidi-dev \
-            libswscale-dev \
-            libavformat-dev \
-            libavcodec-dev
+            libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+            pkg-config libjpeg-dev libmtdev-dev xclip xsel
 
-
-      # 5. Установка Python-пакетов и Buildozer в виртуальном окружении
-      - name: Install Buildozer and Python dependencies
+      # 6. Установка Buildozer и зависимостей Python
+      - name: Install Buildozer and Python packages
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install virtualenv
-          python3 -m virtualenv venv
-          source venv/bin/activate
-          pip install cython==0.29.33
-          pip install buildozer
-          pip install kivy==2.1.0
+          pip install --upgrade pip
+          pip install buildozer cython==0.29.33 virtualenv kivy==2.0.0
 
-      # 6. Установка NDK, Build-tools и платформ Android
+      # 7. Установка NDK, Build-tools и платформ Android
       - name: Install Android SDK components
         run: |
-          echo "=== Accept Android licenses ==="
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
-
-          echo "=== Installing components ==="
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
             "ndk;21.3.6528147" \
             "build-tools;31.0.0" \
             "platforms;android-31" \
             "platform-tools"
 
-      # 7. Проверка наличия NDK и Build-tools
+      # 8. Проверка наличия NDK и Build-tools
       - name: Verify Android components
         run: |
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 21.3 | head -1)
           if [ -z "$NDK_PATH" ]; then
             echo "❌ NDK not found!"
-            find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null
             exit 1
           fi
           echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
 
           BUILD_TOOLS_DIR="$ANDROID_SDK_ROOT/build-tools/31.0.0"
-          if [ ! -d "$BUILD_TOOLS_DIR" ]; then
-            echo "❌ Build-tools directory not found!"
-            ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "No build-tools"
-            exit 1
-          fi
-
           for bin in aapt zipalign aidl; do
             if [ ! -f "$BUILD_TOOLS_DIR/$bin" ]; then
-              echo "❌ $bin not found in build-tools"
+              echo "❌ $bin not found!"
               exit 1
             fi
           done
           echo "✅ Android components verified"
 
-      # 8. Подготовка main.py и buildozer.spec
+      # 9. Подготовка main.py и buildozer.spec
       - name: Prepare application files
         run: |
-          # main.py
-          cat > main.py <<'MAINEOF'
+          cat > main.py <<'EOF'
           from kivy.app import App
           from kivy.uix.label import Label
 
@@ -126,10 +92,9 @@ jobs:
 
           if __name__ == '__main__':
               TestApp().run()
-          MAINEOF
+          EOF
 
-          # buildozer.spec
-          cat > buildozer.spec <<'SPECEOF'
+                    cat > buildozer.spec <<'EOF'
           [app]
           title = TestApp
           package.name = testapp
@@ -137,7 +102,7 @@ jobs:
           source.dir = .
           source.include_exts = py,png,jpg,kv,atlas
           version = 1.0
-          requirements = python3,kivy==2.1.0
+          requirements = python3,kivy==2.0.0
           orientation = portrait
           android.api = 31
           android.minapi = 21
@@ -153,25 +118,21 @@ jobs:
           [android]
           [android:permissions]
           android.permission.INTERNET
-          SPECEOF
+          EOF
 
-          # Подставляем реальные пути
           sed -i "s|__ANDROID_SDK_ROOT__|$ANDROID_SDK_ROOT|g" buildozer.spec
           sed -i "s|__ANDROID_NDK_PATH__|$NDK_PATH|g" buildozer.spec
 
-          echo "✅ main.py and buildozer.spec prepared"
-
-      # 9. Настройка переменных окружения
+      # 10. Настройка переменных окружения
       - name: Setup environment variables
         run: |
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
           echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
 
-      # 10. Финальная проверка путей перед сборкой
+      # 11. Финальная проверка путей перед сборкой
       - name: Final verification before build
         run: |
           for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME"; do
@@ -182,13 +143,12 @@ jobs:
           done
           echo "✅ All required paths exist"
 
-      # 11. Сборка APK
+      # 12. Сборка APK
       - name: Build APK
         run: |
-          source venv/bin/activate
           buildozer -v android debug
 
-      # 12. Загрузка APK как артефакт
+      # 13. Загрузка APK как артефакт
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -196,7 +156,7 @@ jobs:
           path: bin/*.apk
           if-no-files-found: error
 
-      # 13. Отладка при ошибке
+      # 14. Отладка при ошибке
       - name: Debug on failure
         if: failure()
         run: |
@@ -206,8 +166,6 @@ jobs:
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
           echo "NDK_PATH: $NDK_PATH"
           echo "JAVA_HOME: $JAVA_HOME"
-
           if [ -f ".buildozer/android/platform/build.log" ]; then
-            echo "=== Last 100 lines of Buildozer log ==="
             tail -100 .buildozer/android/platform/build.log
           fi
