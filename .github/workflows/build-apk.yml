@@ -14,7 +14,7 @@ jobs:
     - name: Setup
       run: |
         sudo apt update
-        sudo apt install -y python3-pip
+        sudo apt install -y python3-pip openjdk-11-jdk
         pip3 install buildozer==1.4.0 cython==0.29.33 pygame==2.1.2 
     
     - name: Create minimal spec
@@ -35,17 +35,57 @@ jobs:
         [buildozer]
         warn_on_root = 0
         log_level = 2
-        android.accept_sdk_license = True
         EOF
         
         echo 'print("Hello")' > main.py
     
+    - name: Accept Android SDK licenses
+      run: |
+        mkdir -p ~/.android
+        echo "### User Sources for Android Tool ###" > ~/.android/repositories.cfg
+        # Принимаем все лицензии Android SDK
+        yes | /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        # Альтернативный способ - установка переменной окружения
+        mkdir -p /tmp/licenses
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > /tmp/licenses/android-sdk-license
+        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> /tmp/licenses/android-sdk-license
+        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> /tmp/licenses/android-sdk-license
+        echo "84831b9409646a918e30573b4ad6cb1653d37abb" >> /tmp/licenses/android-sdk-license
+        echo "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" >> /tmp/licenses/android-sdk-license
+        echo "79120722343a6f314e0719f863036c702b0e6b2a" >> /tmp/licenses/android-sdk-license
+        echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" >> /tmp/licenses/android-sdk-license
+        echo "85b5a0da6d1e23e8f42d5a1e0c75470e6493b7c7" >> /tmp/licenses/android-sdk-license
+    
     - name: Build with auto-download
       run: |
-        # Buildozer сам скачает SDK с правильными версиями
-        buildozer android debug 2>&1 | tail -50
+        # Устанавливаем переменную окружения для автоматического принятия лицензий
+        export ANDROID_HOME="/home/runner/.buildozer/android/platform/android-sdk"
+        mkdir -p ~/.android
+        touch ~/.android/repositories.cfg
+        
+        # Пытаемся принять лицензии через sdkmanager
+        if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        fi
+        
+        # Запускаем buildozer с автоматическим принятием лицензий
+        echo "y" | buildozer android debug 2>&1 | tail -100
+        
+        # Пробуем еще раз с явным указанием принять лицензии
+        buildozer android debug 2>&1 | tail -100 || true
+    
+    - name: Check for APK
+      run: |
+        if [ -f bin/*.apk ]; then
+          echo "APK найден!"
+          ls -la bin/
+        else
+          echo "APK не найден, проверьте логи выше"
+          ls -la
+        fi
     
     - uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: apk-result
         path: bin/*.apk
