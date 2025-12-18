@@ -60,10 +60,11 @@ jobs:
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
         
-    - name: Create minimal buildozer.spec (критически важно!)
+    - name: Create buildozer.spec
       run: |
-        # Минимальный spec файл БЕЗ android.accept_sdk_license
-          cat > buildozer.spec << 'EOF'
+        # Используем существующий spec файл или создаем минимальный
+        if [ ! -f "buildozer.spec" ]; then
+            cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
@@ -75,23 +76,38 @@ jobs:
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
-        # НЕ ИСПОЛЬЗУЕМ android.accept_sdk_license - вызывает проблемы
-        # android.sdk_path тоже не указываем - пусть использует системный
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
+        else
+          echo "Используем существующий buildozer.spec"
+          cat buildozer.spec
+        fi
         
-    - name: Pre-download python-for-android
+    - name: Pre-download python-for-android (ИСПРАВЛЕНО)
       run: |
         mkdir -p .buildozer/android/platform
         cd .buildozer/android/platform
         
-        # Клонируем конкретную стабильную версию python-for-android
-        git clone --depth 1 --branch 2024.01.21 https://github.com/kivy/python-for-android.git
+        # Удаляем старую версию если есть
+        rm -rf python-for-android
         
-    - name: Build APK with direct SDK management
+        echo "=== Клонируем python-for-android ==="
+        
+        # ВАРИАНТ 1: Используем master ветку (самый простой и надежный)
+        git clone --depth 1 https://github.com/kivy/python-for-android.git
+        
+        # ИЛИ ВАРИАНТ 2: Используем конкретный тег (нужно клонировать сначала, потом переключиться)
+        # git clone https://github.com/kivy/python-for-android.git
+        # cd python-for-android
+        # git fetch --tags
+        # git checkout 2024.01.21  # или другой тег
+        
+        echo "✓ python-for-android успешно скачан"
+        
+    - name: Build APK
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -100,25 +116,41 @@ jobs:
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
       run: |
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-      
-                
-                echo "=== Запускаем сборку с отключением автоматического обновления SDK ==="
         
-        # Сначала инициализируем без сборки
-        buildozer init 2>&1 | tail -20
+        echo "=== Проверяем наличие main.py ==="
+        if [ -f "main.py" ]; then
+          echo "✓ main.py найден ($(wc -l < main.py) строк)"
+          echo "Первые 3 строки:"
+          head -3 main.py
+        else
+          echo "✗ ОШИБКА: main.py не найден!"
+          exit 1
+        fi
         
-        # Затем запускаем сборку с флагом для отключения проверки SDK
-        # Используем более новую версию NDK из системы
+        echo "=== Проверяем зависимости ==="
+        if [ -f "requirements.txt" ]; then
+          echo "requirements.txt:"
+          cat requirements.txt
+        fi
+        
+        echo "=== Запускаем сборку Wave Defender ==="
+        
+        # Инициализируем если нужно
+        buildozer init 2>&1 | tail -10 || true
+        
+        # Используем системный NDK
         export P4A_NDK_VERSION=27
         
-        # Запускаем сборку (может занять 15-30 минут)
-        timeout 2400 buildozer -v android debug 2>&1 | tee build.log
+        # Запускаем сборку с подробным логом
+        echo "Сборка началась (это может занять 20-30 минут)..."
+        timeout 2700 buildozer -v android debug 2>&1 | tee build.log
         
-        # Пробуем альтернативный метод если первый не сработал
-        if [ ! -f bin/*.apk ]; then
-          echo "=== Пробуем альтернативный метод сборки ==="
-          buildozer android clean
-          timeout 1800 buildozer android debug 2>&1 | tail -200
+        # Проверяем результат
+        if [ -f bin/*.apk ]; then
+          echo "✓ Сборка завершена успешно!"
+        else
+          echo "⚠ Сборка не удалась, проверяем логи..."
+          tail -200 build.log | grep -A10 -B10 "error\|Error\|ERROR\|fail\|Fail\|FAIL"
         fi
         
     - name: Check and upload APK
@@ -126,17 +158,26 @@ jobs:
         echo "=== Проверка результата ==="
         if ls bin/*.apk 1> /dev/null 2>&1; then
           echo "✅ SUCCESS: APK найден!"
-          ls -lah bin/*.apk
-          echo "APK size: $(du -h bin/*.apk | cut -f1)"
+          APK_FILE=$(ls bin/*.apk)
+          echo "Файл: $APK_FILE"
+          echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
+          echo "Дата: $(date -r "$APK_FILE")"
         else
           echo "❌ FAILED: APK не найден"
-          echo "Последние 100 строк лога:"
-          tail -100 build.log 2>/dev/null || echo "Лог не найден"
+          echo "Ищем логи ошибок..."
           
-          # Показываем возможные проблемы
+          # Проверяем наличие логов
+          if [ -f "build.log" ]; then
+            echo "Последние ошибки из build.log:"
+            tail -100 build.log | grep -i "error\|fail\|exception"
+          fi
+          
           if [ -d ".buildozer" ]; then
-            echo "Содержимое .buildozer:"
-            find .buildozer -name "*.log" -type f | head -5 | xargs -I {} sh -c 'echo "=== {} ==="; tail -50 {}'
+            echo "Логи buildozer:"
+            find .buildozer -name "*.log" -type f | head -3 | while read log; do
+              echo "=== $log ==="
+              tail -50 "$log" 2>/dev/null || true
+            done
           fi
         fi
         
