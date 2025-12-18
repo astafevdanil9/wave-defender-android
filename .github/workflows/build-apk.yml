@@ -41,20 +41,22 @@ jobs:
         
     - name: Install Android SDK and Build Tools
       run: |
-        # Установка Android SDK командной строки
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        mkdir -p /usr/local/android-sdk/cmdline-tools
-        unzip commandlinetools-linux-9477386_latest.zip -d /usr/local/android-sdk/cmdline-tools
-        mv /usr/local/android-sdk/cmdline-tools/cmdline-tools /usr/local/android-sdk/cmdline-tools/latest
+        # Установка в домашнюю директорию (не требует sudo)
+        cd ~
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        mkdir -p android-sdk/cmdline-tools
+        unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/cmdline-tools
+        mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
         
-        # Добавление в PATH
-        echo 'export ANDROID_SDK_ROOT=/usr/local/android-sdk' >> ~/.bashrc
-        echo 'export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools' >> ~/.bashrc
-        source ~/.bashrc
+        # Настройка переменных окружения
+        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
         
-        # Принятие лицензий и установка build-tools
-        yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+        # Принятие лицензий и установка компонентов
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
         
     - name: Install Buildozer and Cython
       run: |
