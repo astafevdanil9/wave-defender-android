@@ -1,4 +1,4 @@
-name: Build Android APK with Custom Docker
+name: Build Android APK
 
 on:
   push:
@@ -11,99 +11,23 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build custom Docker image
+    - name: Prepare workspace permissions
       run: |
-        cat > Dockerfile << 'EOF'
-        FROM ubuntu:22.04
+        # Даем права на запись в workspace
+        chmod -R 777 ${{ github.workspace }}
 
-        # Устанавливаем переменные окружения
-        ENV DEBIAN_FRONTEND=noninteractive
-        ENV USER=appuser
-        ENV HOME=/home/$USER
-
-        # Устанавливаем зависимости
-        RUN apt-get update && apt-get install -y \
-            python3 \
-            python3-pip \
-            python3-venv \
-            git \
-            zip \
-            unzip \
-            wget \
-            curl \
-            && rm -rf /var/lib/apt/lists/*
-
-        # Создаем не-root пользователя
-        RUN useradd -m -u 1000 $USER
-
-        # Устанавливаем buildozer с правильными настройками
-        RUN pip3 install --no-cache-dir buildozer cython==0.29.36
-
-        # Создаем конфигурацию по умолчанию
-        RUN mkdir -p $HOME/.buildozer && \
-            echo '[buildozer]' > $HOME/.buildozer/default.spec && \
-            echo 'log_level = 2' >> $HOME/.buildozer/default.spec && \
-            echo 'warn_on_root = 0' >> $HOME/.buildozer/default.spec && \
-            chown -R $USER:$USER $HOME
-
-        # Переключаемся на не-root пользователя
-        USER $USER
-        WORKDIR /app
-
-        # Команда по умолчанию
-        CMD ["buildozer", "android", "debug"]
-        EOF
-
-        # Собираем образ
-        docker build -t my-buildozer .
-
-    - name: Prepare application
-      run: |
-        # Создаем минимальное приложение
-        if [ ! -f main.py ]; then
-          cat > main.py << 'EOF'
-        print("Hello from Android App")
-        EOF
-                fi
-
-        # Создаем buildozer.spec
-        buildozer init -y 2>/dev/null || true
-        
-        # Обновляем настройки
-        python3 -c "
-        import configparser
-        config = configparser.ConfigParser()
-        try:
-            config.read('buildozer.spec')
-        except:
-            config['app'] = {}
-            config['buildozer'] = {}
-
-        config['app']['title'] = 'MyApp'
-        config['app']['package.name'] = 'myapp'
-        config['app']['package.domain'] = 'org.test'
-        config['app']['version'] = '1.0'
-        config['app']['requirements'] = 'python3'
-        config['app']['android.api'] = '30'
-        config['app']['android.minapi'] = '21'
-        config['app']['android.archs'] = 'armeabi-v7a'
-
-        config['buildozer']['log_level'] = '2'
-        config['buildozer']['warn_on_root'] = '0'
-
-        with open('buildozer.spec', 'w') as f:
-            config.write(f)
-        "
-
-    - name: Build APK in Docker
+    - name: Build with Docker as user
       run: |
         docker run --rm \
+          --user 1000:1000 \
           -v ${{ github.workspace }}:/app \
-          -v buildozer_data:/home/appuser/.buildozer \
-          my-buildozer
+          -v $HOME/.buildozer_docker:/home/user/.buildozer \
+          kivy/buildozer \
+          bash -c "mkdir -p /app/.buildozer && cd /app && buildozer android debug"
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: android-apk
         path: bin/*.apk
+        if-no-files-found: warn
