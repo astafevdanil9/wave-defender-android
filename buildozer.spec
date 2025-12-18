@@ -10,5 +10,5 @@ orientation = landscape
 fullscreen = 1
 android.api = 31
 android.minapi = 21
-android.arch = arm64-v8a
+android.archs = arm64-v8a
 android.permissions = INTERNET, VIBRATE

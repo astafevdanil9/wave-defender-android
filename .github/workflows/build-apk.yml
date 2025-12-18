@@ -41,7 +41,7 @@ jobs:
         
     - name: Install Buildozer
       run: |
-        pip install buildozer
+        pip install buildozer cython
         echo "$HOME/.local/bin" >> $GITHUB_PATH
         
     - name: Build APK
