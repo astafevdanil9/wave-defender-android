@@ -29,14 +29,61 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 5. Установка Java 8 для совместимости со старым sdkmanager
-    - name: Setup Java 8 for legacy SDK tools
+    # 5. ОТКЛЮЧЕНИЕ старого Android SDK Tools (КРИТИЧЕСКИ ВАЖНЫЙ ШАГ)
+    - name: Disable legacy Android SDK tools
       run: |
+        echo "=== Отключение устаревшего SDK tools ==="
+        LEGACY_SDK_TOOLS="/usr/local/lib/android/sdk/tools"
+        if [ -d "$LEGACY_SDK_TOOLS" ]; then
+          echo "Найден старый SDK tools, переименовываем, чтобы сделать недоступным..."
+          sudo mv "$LEGACY_SDK_TOOLS" "${LEGACY_SDK_TOOLS}.DISABLED"
+          echo "✅ Старый SDK tools переименован в ${LEGACY_SDK_TOOLS}.DISABLED"
+          
+          # Удаляем все ссылки на старый sdkmanager
+          for link in $(which -a sdkmanager 2>/dev/null || true); do
+            if [ "$link" = "/usr/local/lib/android/sdk/tools/bin/sdkmanager" ]; then
+              echo "Удаляем ссылку на старый sdkmanager: $link"
+              sudo rm -f "$link" 2>/dev/null || true
+            fi
+          done
+        else
+          echo "Старый SDK tools не найден в $LEGACY_SDK_TOOLS"
+        fi
+        
+        # Проверяем, что современные cmdline-tools установлены
+        MODERN_SDKMANAGER_PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+        if [ ! -d "$MODERN_SDKMANAGER_PATH" ]; then
+          echo "⚠️ Современные Command Line Tools не найдены! Устанавливаем..."
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          cd "$ANDROID_SDK_ROOT/cmdline-tools"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          
+          # Проверяем структуру после распаковки
+          if [ -d "cmdline-tools" ]; then
+            mv cmdline-tools latest
+            echo "✅ Современные Command Line Tools установлены (структура cmdline-tools)"
+          elif [ -d "tools" ]; then
+            mv tools latest
+            echo "✅ Современные Command Line Tools установлены (структура tools)"
+          else
+            echo "❌ Неожиданная структура после распаковки"
+            ls -la
+          fi
+        else
+          echo "✅ Современные Command Line Tools уже установлены"
+        fi
+
+    # 6. Установка Java 8 для совместимости (на всякий случай)
+    - name: Setup Java 8 for legacy compatibility
+      run: |
+        echo "=== Установка Java 8 для обратной совместимости ==="
         sudo apt update
         sudo apt install -y openjdk-8-jdk
         echo "JAVA8_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+        echo "✅ Java 8 установлена"
 
-    # 6. Системные зависимости для сборки Kivy и Buildozer
+    # 7. Системные зависимости для сборки Kivy и Buildozer
     - name: Install system dependencies
       run: |
         sudo apt update
@@ -51,95 +98,99 @@ jobs:
           gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
           pkg-config libjpeg-dev libmtdev-dev xclip xsel \
           libpango1.0-dev libharfbuzz-dev
+        echo "✅ Системные зависимости установлены"
 
-    # 7. Установка Buildozer и зависимостей Python
+    # 8. Установка Buildozer и зависимостей Python
     - name: Install Buildozer and Python packages
       run: |
-        pip install --upgrade pip setuptools virtualenv
-        pip install buildozer "cython<3.0"
+        echo "=== Установка Buildozer и Python пакетов ==="
+        pip install --upgrade pip setuptools virtualenv wheel
+        pip install buildozer==1.5.0 "cython<3.0"
         pip install "kivy[base]" kivy_examples --pre --extra-index-url https://kivy.org/downloads/simple/
+        echo "✅ Buildozer и зависимости установлены"
 
-    # 8. Проверка и использование современного sdkmanager
+    # 9. Установка NDK, Build-tools и платформ Android (ИСПРАВЛЕННЫЙ)
     - name: Install Android SDK components
       run: |
-        # Используем современный sdkmanager из Command Line Tools
+        echo "=== Установка Android компонентов ==="
+        
+        # Явно указываем путь к современному sdkmanager
         SDKMANAGER_CMD="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
-        # Проверяем наличие команды
         if [ ! -f "$SDKMANAGER_CMD" ]; then
-          echo "❌ Modern sdkmanager not found at: $SDKMANAGER_CMD"
-          echo "Checking available paths..."
+          echo "❌ ОШИБКА: Современный sdkmanager не найден!"
+          echo "Ищем доступные sdkmanager:"
           find $ANDROID_SDK_ROOT -name "sdkmanager" -type f 2>/dev/null
           exit 1
         fi
         
-        echo "✅ Using modern sdkmanager: $SDKMANAGER_CMD"
+        echo "✅ Используем современный sdkmanager: $SDKMANAGER_CMD"
         
-        # Принимаем лицензии
-        echo "Accepting Android licenses..."
-        yes | $SDKMANAGER_CMD --licenses > /dev/null 2>&1 || echo "License acceptance completed"
+        # Принимаем лицензии (важно для CI)
+        echo "Принимаем лицензии Android..."
+        yes | $SDKMANAGER_CMD --licenses > /dev/null 2>&1 || echo "Лицензии приняты"
         
-        # Устанавливаем компоненты
-        echo "Installing Android SDK components..."
-        $SDKMANAGER_CMD --sdk_root=$ANDROID_SDK_ROOT \
-          "ndk;21.3.6528147" \
-          "build-tools;31.0.0" \
-          "platforms;android-31" \
-          "platform-tools"
+        # Устанавливаем компоненты по одному для надежности
+        echo "Устанавливаем platform-tools..."
+        $SDKMANAGER_CMD "platform-tools"
         
-        echo "✅ Android SDK components installed"
+        echo "Устанавливаем build-tools..."
+        $SDKMANAGER_CMD "build-tools;31.0.0"
+        
+        echo "Устанавливаем platform..."
+        $SDKMANAGER_CMD "platforms;android-31"
+        
+        echo "Устанавливаем NDK..."
+        $SDKMANAGER_CMD "ndk;21.3.6528147"
+        
+        echo "✅ Все компоненты Android SDK установлены"
 
-    # 9. Проверка наличия NDK и Build-tools
+    # 10. Проверка наличия NDK и Build-tools
     - name: Verify Android components
       run: |
-        echo "=== Verifying Android components ==="
+        echo "=== Проверка Android компонентов ==="
         
         # Проверяем NDK
         NDK_PATH="$ANDROID_SDK_ROOT/ndk/21.3.6528147"
         if [ ! -d "$NDK_PATH" ]; then
-          echo "⚠️ NDK not found at exact path, searching..."
-          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | head -1)
+          echo "⚠️ NDK не найден по точному пути, ищем альтернативы..."
+          NDK_PATH=$(find $ANDROID_SDK_ROOT -path "*/ndk/*21.3*" -type d 2>/dev/null | head -1)
+          if [ -z "$NDK_PATH" ]; then
+            NDK_PATH=$(find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null | grep -v ".DISABLED" | head -1)
+          fi
+          
           if [ -z "$NDK_PATH" ] || [ ! -d "$NDK_PATH" ]; then
-            echo "❌ NDK not found!"
+            echo "❌ NDK не найден!"
             find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null
             exit 1
           fi
         fi
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
-        echo "✅ NDK found: $NDK_PATH"
+        echo "✅ NDK найден: $NDK_PATH"
         
         # Проверяем Build-tools
         BUILD_TOOLS_DIR="$ANDROID_SDK_ROOT/build-tools/31.0.0"
         if [ ! -d "$BUILD_TOOLS_DIR" ]; then
-          echo "❌ Build-tools directory not found: $BUILD_TOOLS_DIR"
-          echo "Available build-tools versions:"
-          ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "No build-tools directory"
+          echo "❌ Директория build-tools не найдена: $BUILD_TOOLS_DIR"
+          echo "Доступные версии build-tools:"
+          ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "Нет директории build-tools"
           exit 1
         fi
         
         for bin in aapt zipalign aidl; do
           if [ ! -f "$BUILD_TOOLS_DIR/$bin" ]; then
-            echo "❌ $bin not found in $BUILD_TOOLS_DIR/"
+            echo "❌ $bin не найден в $BUILD_TOOLS_DIR/"
             exit 1
           fi
-          echo "✅ $bin found"
+          echo "✅ $bin найден"
         done
         
-        # Проверяем другие компоненты
-        for component in "platform-tools" "platforms/android-31"; do
-          if [ -d "$ANDROID_SDK_ROOT/$component" ]; then
-            echo "✅ $component found"
-          else
-            echo "⚠️ $component not found (may be optional)"
-          fi
-        done
-        
-        echo "✅ All Android components verified"
+        echo "✅ Все Android компоненты проверены"
 
-    # 10. Подготовка main.py и buildozer.spec
+    # 11. Подготовка main.py и buildozer.spec (с правильным синтаксисом)
     - name: Prepare application files
       run: |
-        echo "=== Preparing application files ==="
+        echo "=== Подготовка файлов приложения ==="
         
         # Создаем main.py
         cat > main.py << 'MAIN_EOF'
@@ -153,10 +204,10 @@ jobs:
         if __name__ == '__main__':
             TestApp().run()
         MAIN_EOF
-                echo "✅ main.py created"
-        
-        # Создаем buildozer.spec с использованием правильных путей
-        cat > buildozer.spec << 'SPEC_EOF'
+                echo "✅ main.py создан"
+                
+                # Создаем buildozer.spec с ПРАВИЛЬНЫМ синтаксисом android.archs
+                cat > buildozer.spec << 'SPEC_EOF'
         [app]
         title = TestApp
         package.name = testapp
@@ -168,11 +219,13 @@ jobs:
         orientation = portrait
         android.api = 31
         android.minapi = 21
-        android.arch = armeabi-v7a
 
-        # Автоматическое определение путей
-        # android.sdk_path = /usr/local/lib/android/sdk
-        # android.ndk_path = /usr/local/lib/android/sdk/ndk/21.3.6528147
+        # ИСПРАВЛЕНО: используем android.archs вместо устаревшего android.arch
+        android.archs = armeabi-v7a
+
+        # Пути будут установлены автоматически
+        # android.sdk_path = 
+        # android.ndk_path = 
 
         [buildozer]
         log_level = 2
@@ -184,47 +237,65 @@ jobs:
         android.permission.INTERNET
         SPEC_EOF
         
-        # Динамически обновляем пути в buildozer.spec
-        echo "Updating paths in buildozer.spec..."
-        sed -i "/^# android.sdk_path/c\\android.sdk_path = $ANDROID_SDK_ROOT" buildozer.spec
-        sed -i "/^# android.ndk_path/c\\android.ndk_path = $NDK_PATH" buildozer.spec
+        # Динамически устанавливаем пути в buildozer.spec
+        echo "Обновляем пути в buildozer.spec..."
+        sed -i "s|^# android.sdk_path =.*|android.sdk_path = $ANDROID_SDK_ROOT|" buildozer.spec
+        sed -i "s|^# android.ndk_path =.*|android.ndk_path = $NDK_PATH|" buildozer.spec
         
-        echo "✅ buildozer.spec created and configured"
+        echo "✅ buildozer.spec создан и настроен"
         
-        # Показываем итоговый файл
-        echo "=== Final buildozer.spec ==="
-        grep -E "^(android\.(sdk|ndk)_path|requirements|title)" buildozer.spec
+        # Показываем ключевые настройки
+        echo "=== Ключевые настройки buildozer.spec ==="
+        grep -E "^(android\.(sdk|ndk)_path|android\.archs|requirements|title)" buildozer.spec
 
-    # 11. Настройка переменных окружения
+    # 12. Настройка переменных окружения (ВАЖНО: правильный порядок PATH)
     - name: Setup environment variables
       run: |
-        echo "=== Setting up environment variables ==="
+        echo "=== Настройка переменных окружения ==="
         
         # Основные переменные Android
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         
-        # Добавляем пути в правильном порядке
-        # 1. Современные Command Line Tools
+        # КРИТИЧЕСКИ ВАЖНО: Добавляем пути в ПРАВИЛЬНОМ порядке
+        # 1. Современные Command Line Tools (должно быть первым!)
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
         # 2. Platform tools
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
         # 3. Build tools
         echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
-        # 4. Java 17 (основная)
-        echo "$JAVA_HOME_17_X64/bin" >> $GITHUB_PATH
         
-        echo "✅ Environment variables set"
-        echo "PATH will contain in order:"
-        echo "1. Modern Android tools"
+        echo "✅ Переменные окружения установлены"
+        echo "Порядок PATH:"
+        echo "1. Современные Android tools (cmdline-tools)"
         echo "2. Platform tools"
         echo "3. Build tools"
-        echo "4. Java 17"
 
-    # 12. Финальная проверка перед сборкой
+    # 13. Финальная проверка перед сборкой
     - name: Final verification before build
       run: |
-        echo "=== Final verification ==="
+        echo "=== Финальная проверка ==="
+        
+        # Проверяем, что старый SDK отключен
+        if [ -d "/usr/local/lib/android/sdk/tools" ]; then
+          echo "❌ СТАРЫЙ SDK tools ВСЕ ЕЩЕ ДОСТУПЕН! Это вызовет ошибку."
+          exit 1
+        else
+          echo "✅ Старый SDK tools отключен"
+        fi
+        
+        # Проверяем, какой sdkmanager будет использоваться
+        echo "Проверка sdkmanager:"
+        which sdkmanager 2>/dev/null || echo "sdkmanager не найден в PATH (но мы используем полный путь)"
+        
+        # Проверяем путь к современному sdkmanager
+        MODERN_SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        if [ -f "$MODERN_SDKMANAGER" ]; then
+          echo "✅ Современный sdkmanager доступен: $MODERN_SDKMANAGER"
+        else
+          echo "❌ Современный sdkmanager НЕ найден!"
+          exit 1
+        fi
         
         # Проверяем критические пути
         CRITICAL_PATHS=(
@@ -232,42 +303,30 @@ jobs:
           "$NDK_PATH"
           "$JAVA_HOME_17_X64"
           "$ANDROID_SDK_ROOT/build-tools/31.0.0"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
         )
         
         all_paths_ok=true
         for path in "${CRITICAL_PATHS[@]}"; do
           if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-            echo "❌ Path does not exist: $path"
+            echo "❌ Путь не существует: $path"
             all_paths_ok=false
           else
-            echo "✅ Path exists: $path"
+            echo "✅ Путь существует: $path"
           fi
         done
         
         if [ "$all_paths_ok" = false ]; then
-          echo "❌ Some critical paths are missing"
+          echo "❌ Некоторые критические пути отсутствуют"
           exit 1
         fi
         
-        # Проверяем версии
-        echo "Checking versions:"
-        echo "Python: $(python --version 2>&1)"
-        echo "Java: $(java -version 2>&1 | head -1)"
-        echo "Buildozer: $(buildozer --version 2>&1 | head -1 || echo 'Not found')"
-        
-        # Проверяем sdkmanager
-        if command -v sdkmanager > /dev/null 2>&1; then
-          echo "✅ sdkmanager is available in PATH"
-        else
-          echo "⚠️ sdkmanager not in PATH, but we use full path"
-        fi
-        
-        echo "✅ All verifications passed"
+        echo "✅ Все проверки пройдены"
 
-    # 13. Сборка APK
+    # 14. Сборка APK
     - name: Build APK
       run: |
-        echo "=== Starting APK build ==="
+        echo "=== Начало сборки APK ==="
         
         # Экспортируем переменные для текущего шага
         export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
@@ -276,27 +335,28 @@ jobs:
         export NDK_PATH="$NDK_PATH"
         
         # Показываем информацию о среде
-        echo "Build environment:"
+        echo "Среда сборки:"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "NDK_PATH: $NDK_PATH"
         echo "JAVA_HOME: $JAVA_HOME"
         echo "Python: $(python --version)"
+        echo "Buildozer: $(buildozer --version 2>&1 | head -1)"
         
         # Запускаем сборку
-        echo "Running buildozer..."
+        echo "Запуск buildozer..."
         buildozer -v android debug
         
-        echo "✅ APK build completed"
+        echo "✅ Сборка APK завершена"
         
         # Показываем результат
         if [ -d "bin" ]; then
-          echo "=== Generated APK files ==="
-          ls -la bin/*.apk 2>/dev/null || echo "No APK files in bin directory"
+          echo "=== Созданные APK файлы ==="
+          ls -la bin/*.apk 2>/dev/null || echo "Нет APK файлов в директории bin"
         else
-          echo "⚠️ bin directory not created"
+          echo "⚠️ Директория bin не создана"
         fi
 
-    # 14. Загрузка APK как артефакт
+    # 15. Загрузка APK как артефакт
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
@@ -304,44 +364,41 @@ jobs:
         path: bin/*.apk
         if-no-files-found: error
 
-    # 15. Отладка при ошибке
+    # 16. Отладка при ошибке
     - name: Debug on failure
       if: failure()
       run: |
-        echo "=== DEBUG INFORMATION ==="
+        echo "=== ИНФОРМАЦИЯ ДЛЯ ОТЛАДКИ ==="
         echo ""
-        echo "1. System Information:"
+        echo "1. Информация о системе:"
         echo "   Python: $(python --version 2>&1)"
         echo "   Java: $(java -version 2>&1 | head -3)"
-        echo "   Java Home: $JAVA_HOME"
+        echo "   Buildozer: $(buildozer --version 2>&1 | head -1)"
         echo ""
-        echo "2. Android SDK Information:"
+        echo "2. Информация об Android SDK:"
         echo "   ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "   NDK_PATH: $NDK_PATH"
-        echo "   Available NDKs:"
+        echo "   Доступные NDK:"
         find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null | head -5
         echo ""
-        echo "3. File Structure:"
+        echo "3. Проверка sdkmanager:"
+        echo "   which sdkmanager: $(which sdkmanager 2>/dev/null || echo 'не найден')"
+        echo "   Современный sdkmanager: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        echo "   Существует: $([ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ] && echo 'ДА' || echo 'НЕТ')"
+        echo "   Старый SDK tools: $([ -d "/usr/local/lib/android/sdk/tools" ] && echo 'ДА (ПРОБЛЕМА!)' || echo 'НЕТ (хорошо)')"
+        echo ""
+        echo "4. Структура файлов:"
         ls -la
         echo ""
-        echo "4. APK Search:"
-        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+        echo "5. Поиск APK:"
+        find . -name "*.apk" -type f 2>/dev/null || echo "APK файлы не найдены"
         echo ""
-        echo "5. Buildozer Log (last 100 lines):"
+        echo "6. Лог Buildozer (последние 100 строк):"
         if [ -f ".buildozer/android/platform/build.log" ]; then
           tail -100 .buildozer/android/platform/build.log
         else
-          echo "Build log not found"
+          echo "Лог сборки не найден"
           find . -name "*.log" -type f 2>/dev/null | head -5
         fi
         echo ""
-        echo "6. Environment Variables:"
-        echo "   PATH: $PATH"
-        echo "   JAVA_HOME: $JAVA_HOME"
-        echo "   ANDROID_HOME: $ANDROID_HOME"
-        echo ""
-        echo "7. sdkmanager Check:"
-        which sdkmanager 2>/dev/null || echo "sdkmanager not in PATH"
-        ls -la $ANDROID_SDK_ROOT/cmdline-tools/ 2>/dev/null || echo "No cmdline-tools"
-        echo ""
-        echo "=== END DEBUG INFO ==="
+        echo "=== КОНЕЦ ИНФОРМАЦИИ ДЛЯ ОТЛАДКИ ==="
