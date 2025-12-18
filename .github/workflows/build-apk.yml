@@ -12,14 +12,14 @@ jobs:
     # 1. Checkout
     - uses: actions/checkout@v4
 
-    # 2. Setup Python 3.9
-    - name: Setup Python
+    # 2. Setup Python
+    - name: Setup Python 3.9
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    # 3. Setup Java 17
-    - name: Setup Java
+    # 3. Setup Java
+    - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
         distribution: temurin
@@ -32,57 +32,72 @@ jobs:
         sudo apt install -y \
           python3-pip python3-dev git zip unzip build-essential \
           libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libpango1.0-dev libharfbuzz-dev wget curl libssl-dev libffi-dev \
-          autoconf automake cmake libtool pkg-config zlib1g-dev ccache \
-          libncurses5-dev libgdbm-dev libnss3-dev libreadline-dev libsqlite3-dev
+          libpango1.0-dev libharfbuzz-dev wget unzip curl \
+          libssl-dev libffi-dev autoconf automake cmake \
+          libtool pkg-config zlib1g-dev ccache \
+          libncurses5-dev libgdbm-dev libnss3-dev \
+          libreadline-dev libsqlite3-dev \
+          liblzma-dev tk-dev uuid-dev
 
-    # 5. Install Buildozer, Cython, Kivy, python-for-android
-    - name: Install Buildozer and Kivy
+    # 5. Install Buildozer and dependencies
+    - name: Install Buildozer and dependencies
       run: |
         pip install --upgrade pip setuptools wheel
-        pip install buildozer==1.5.0 cython==0.29.36 kivy==2.1.0
-        pip install python-for-android==2023.10.06
+        # Устанавливаем совместимые версии
+        pip install buildozer==1.5.0
+        pip install cython==0.29.36
+        pip install kivy==2.1.0
+        # python-for-android устанавливается автоматически с buildozer
+        pip install "virtualenv>=20.0.0"
+        pip install "sh>=1.14.0"
 
-    # 6. Setup Android SDK and NDK
+    # 6. Install Android SDK and NDK
     - name: Install Android SDK and NDK
       run: |
         export ANDROID_SDK_ROOT="$HOME/android-sdk"
-        mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+        export ANDROID_HOME="$ANDROID_SDK_ROOT"
+        
+        # Создаем директорию
+        mkdir -p $ANDROID_SDK_ROOT
         cd $ANDROID_SDK_ROOT
-
-        # Command Line Tools
+        
+        # Скачиваем Command Line Tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         rm commandlinetools-linux-9477386_latest.zip
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-
+        
+        # Перемещаем в правильную структуру
+        mkdir -p cmdline-tools
+        mv cmdline-tools cmdline-tools/latest
+        
         # Добавляем в PATH
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-
-        # Лицензии и компоненты
+        
+        # Принимаем лицензии
         yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        
+        # Устанавливаем компоненты
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
           "platform-tools" \
-          "platforms;android-33" \
-          "build-tools;33.0.0" \
-          "ndk;25.1.8937393"
-
-        # Пути к NDK
-        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*25.1*" | head -1)
+          "platforms;android-31" \
+          "build-tools;31.0.0" \
+          "ndk;23.1.7779620"
+        
+        # Находим путь к NDK
+        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*23.1*" | head -1)
+        if [ -z "$NDK_PATH" ]; then
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | head -1)
+        fi
+        
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
-        # Символическая ссылка для старых Buildozer версий
-        mkdir -p $ANDROID_SDK_ROOT/tools
-        ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin $ANDROID_SDK_ROOT/tools/bin
-
-    # 7. Increase swap for compilation
+    # 7. Increase swap space for compilation
     - name: Increase swap space
       run: |
-        sudo fallocate -l 4G /swapfile
+        sudo dd if=/dev/zero of=/swapfile bs=1G count=4
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
@@ -91,7 +106,9 @@ jobs:
     # 8. Prepare application files
     - name: Prepare application
       run: |
-        cat > main.py <<EOF
+        # Если main.py уже существует, не перезаписываем его
+        if [ ! -f main.py ]; then
+          cat > main.py <<EOF
         from kivy.app import App
         from kivy.uix.label import Label
 
@@ -102,72 +119,124 @@ jobs:
         if __name__ == '__main__':
             TestApp().run()
         EOF
+                fi
+        
+        # Если buildozer.spec уже существует, обновляем его
+        if [ ! -f buildozer.spec ]; then
+          buildozer init -y
+        fi
 
-        # Инициализация Buildozer
-        buildozer init -y
-
-        # Обновляем buildozer.spec
+    # 9. Update buildozer.spec
+    - name: Update buildozer.spec
+      run: |
         python3 -c "
-        import configparser, os
+        import configparser
+        import os
+
         config = configparser.ConfigParser()
         config.read('buildozer.spec')
+
+        # Обновляем основные настройки
         config['app']['title'] = 'TestApp'
         config['app']['package.name'] = 'testapp'
-        config['app']['package.domain'] = 'org.example'
-        config['app']['version'] = '1.0'
+        config['app']['package.domain'] = 'org.test'
+        config['app']['version'] = '0.1'
         config['app']['requirements'] = 'python3,kivy==2.1.0'
-        config['app']['orientation'] = 'portrait'
-        config['app']['android.api'] = '33'
+        config['app']['android.api'] = '31'
         config['app']['android.minapi'] = '21'
+        config['app']['android.ndk_api'] = '21'
         config['app']['android.archs'] = 'armeabi-v7a'
-        config['app']['android.sdk_path'] = os.environ.get('ANDROID_SDK_ROOT', '')
-        config['app']['android.ndk_path'] = os.environ.get('NDK_PATH', '')
-        config['app']['p4a.hostpython'] = 'python3.9'
-          if 'buildozer' not in config:
+
+        # Устанавливаем пути к SDK и NDK
+        sdk_path = os.environ.get('ANDROID_SDK_ROOT', '')
+        ndk_path = os.environ.get('NDK_PATH', '')
+        if sdk_path:
+            config['app']['android.sdk_path'] = sdk_path
+        if ndk_path:
+            config['app']['android.ndk_path'] = ndk_path
+
+        # Настройки buildozer
+        if 'buildozer' not in config:
             config['buildozer'] = {}
-            config['buildozer']['log_level'] = '2'
-          with open('buildozer.spec', 'w') as f:
+        config['buildozer']['log_level'] = '2'
+
+        # Оптимизация для GitHub Actions
+        config['buildozer']['p4a.branch'] = 'develop'
+        config['buildozer']['android.accept_sdk_license'] = 'True'
+
+        # Сохраняем изменения
+        with open('buildozer.spec', 'w') as f:
             config.write(f)
+
+        print('Updated buildozer.spec')
         "
 
-    # 9. Clean previous builds
+    # 10. Clean previous builds
     - name: Clean previous builds
       run: |
         rm -rf .buildozer bin .gradle
-        buildozer android clean 2>/dev/null || true
+        echo "Cleaned previous builds"
 
-    # 10. Build APK
+    # 11. Debug: Show environment
+    - name: Debug environment
+      run: |
+        echo "Python version:"
+        python3 --version
+        echo "Buildozer version:"
+        buildozer --version 2>/dev/null || echo "Buildozer not found"
+        echo "SDK path: $ANDROID_SDK_ROOT"
+        echo "NDK path: $NDK_PATH"
+        ls -la $ANDROID_SDK_ROOT/ndk/
+
+    # 12. Build APK step by step
     - name: Build APK
-      timeout-minutes: 30
+      timeout-minutes: 45
       run: |
         export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
         export ANDROID_HOME="$ANDROID_SDK_ROOT"
         export ANDROID_NDK_HOME="$NDK_PATH"
         export ANDROID_NDK_ROOT="$NDK_PATH"
-        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$NDK_PATH:$PATH"
+        
+        echo "=== Начинаем сборку ==="
+        
+        # Шаг 1: Обновляем зависимости
+        echo "=== Шаг 1: Обновление зависимостей ==="
+        buildozer android update 2>&1 | tee -a build.log
+        
+        # Шаг 2: Очищаем предыдущую сборку
+        echo "=== Шаг 2: Очистка ==="
+        buildozer android clean 2>&1 | tee -a build.log
+        
+        # Шаг 3: Собираем APK
+        echo "=== Шаг 3: Сборка APK ==="
+        buildozer -v android debug 2>&1 | tee -a build.log
+        
+        echo "=== Сборка завершена ==="
 
-        buildozer -v android debug 2>&1 | tee build.log
-
-    # 11. Check APK
+    # 13. Check if APK was built
     - name: Check APK
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           echo "✅ APK успешно создан!"
           ls -lh bin/*.apk
+          echo "Размер APK:"
+          du -h bin/*.apk
         else
           echo "❌ APK не найден!"
-          tail -50 build.log
+          echo "Поиск возможных ошибок в логе:"
+          grep -i "error\|fail\|exception" build.log | head -20
           exit 1
         fi
 
-    # 12. Remove swap
+    # 14. Remove swap
     - name: Remove swap
       if: always()
       run: |
-        sudo swapoff /swapfile || true
-        sudo rm -f /swapfile || true
+        sudo swapoff /swapfile 2>/dev/null || true
+        sudo rm -f /swapfile 2>/dev/null || true
 
-    # 13. Upload APK
+    # 15. Upload APK
     - name: Upload APK
       if: success()
       uses: actions/upload-artifact@v4
@@ -176,7 +245,7 @@ jobs:
         path: bin/*.apk
         retention-days: 7
 
-    # 14. Upload build log on failure
+    # 16. Upload build log on failure
     - name: Upload build log on failure
       if: failure()
       uses: actions/upload-artifact@v4
