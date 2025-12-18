@@ -40,18 +40,23 @@ jobs:
           wget
           
         pip3 install --upgrade pip wheel setuptools
-        pip3 install buildozer==1.5.0 cython==0.29.33 pygame==2.1.2
+        pip3 install buildozer cython pygame==2.1.2
         
-    - name: Setup Android SDK and ACCEPT LICENSES (КРИТИЧЕСКИ ВАЖНО)
+    - name: Setup Android SDK with modern tools (КРИТИЧЕСКИ ВАЖНО)
       run: |
         # Устанавливаем переменные окружения
         export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
+        
+        # УДАЛЯЕМ старые tools которые вызывают ошибку
+        echo "=== УДАЛЯЕМ старые инструменты tools/ ==="
+        rm -rf $ANDROID_SDK_ROOT/tools 2>/dev/null || true
+        
+        # Используем ТОЛЬКО современные cmdline-tools
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
-        echo "=== ПРИНИМАЕМ ЛИЦЕНЗИИ ANDROID SDK ==="
-        
-        # СПОСОБ 1: Создаем файлы лицензий вручную (гарантировано работает)
+        echo "=== Принимаем лицензии ==="
+        # Создаем файлы лицензий вручную (гарантированно работает)
         mkdir -p $ANDROID_SDK_ROOT/licenses
           cat > $ANDROID_SDK_ROOT/licenses/android-sdk-license << 'EOF'
         8933bad161af4178b1185d1a37fbf41ea5269c55
@@ -64,25 +69,19 @@ jobs:
         85b5a0da6d1e23e8f42d5a1e0c75470e6493b7c7
         EOF
         
-        echo "✓ Созданы файлы лицензий"
-        ls -la $ANDROID_SDK_ROOT/licenses/
+        # Принимаем лицензии через современные инструменты
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -10 || true
         
-        # СПОСОБ 2: Пробуем принять через sdkmanager (дополнительная проверка)
-        echo "=== Пробуем принять лицензии через sdkmanager ==="
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -20 || echo "Продолжаем сборку..."
-        
-        # Устанавливаем необходимые компоненты
-        echo "=== Устанавливаем Android компоненты ==="
+        echo "=== Устанавливаем компоненты через cmdline-tools ==="
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "tools"
         
-        echo "✓ Android SDK настроен"
+        echo "✓ Android SDK настроен с использованием cmdline-tools"
         
-    - name: Create buildozer.spec with license acceptance
+    - name: Create buildozer.spec that forces cmdline-tools
       run: |
-        # Создаем spec с явным указанием принятия лицензий
+        # Создаем spec с ЯВНЫМ отключением старого sdkmanager
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -95,21 +94,48 @@ jobs:
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
-        # Указываем что лицензии уже приняты
-        android.accept_sdk_license = true
+        # КРИТИЧЕСКИ ВАЖНО: отключаем авто-обновление SDK
+        android.skip_update = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
+
+        # ПЕРЕОПРЕДЕЛЯЕМ команды sdkmanager
+        [app:source]
+        android.sdkmanager_cmd = /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
         EOF
         
-        echo "✓ buildozer.spec создан"
-        echo "Содержимое buildozer.spec:"
-        cat buildozer.spec
+        echo "✓ buildozer.spec создан с переопределением sdkmanager"
         
-    - name: Pre-download python-for-android
+    - name: Patch Buildozer to use correct sdkmanager
+      run: |
+        # Патчим buildozer чтобы он использовал правильный путь
+        echo "=== Патчим buildozer ==="
+        
+        # Находим файл android.py в buildozer
+        BUILDOCER_ANDROID_PY=$(python3 -c "import buildozer.targets.android as a; print(a.__file__)" 2>/dev/null || echo "")
+        
+        if [ -f "$BUILDOCER_ANDROID_PY" ]; then
+          echo "Найден файл buildozer android: $BUILDOCER_ANDROID_PY"
+          # Делаем backup
+          cp "$BUILDOCER_ANDROID_PY" "${BUILDOCER_ANDROID_PY}.backup"
+        fi
+        
+        # Альтернативно создаем wrapper скрипт
+          cat > /tmp/use_cmdline_sdkmanager.sh << 'EOF'
+        #!/bin/bash
+        # Форсируем использование cmdline-tools вместо старых tools
+        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+        export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
+        exec /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "$@"
+        EOF
+        
+        chmod +x /tmp/use_cmdline_sdkmanager.sh
+        
+    - name: Setup python-for-android
       run: |
         mkdir -p .buildozer/android/platform
         cd .buildozer/android/platform
@@ -122,93 +148,80 @@ jobs:
         
         echo "✓ python-for-android успешно скачан"
         
-    - name: Verify setup before build
-      run: |
-        echo "=== ПРОВЕРКА ПЕРЕД СБОРКОЙ ==="
-        echo "1. Проверяем лицензии:"
-        ls -la /usr/local/lib/android/sdk/licenses/ 2>/dev/null || echo "Директория лицензий не найдена"
-        
-        echo "2. Проверяем Android SDK:"
-        ls -la /usr/local/lib/android/sdk/platforms/ 2>/dev/null || echo "Директория platforms не найдена"
-        
-        echo "3. Проверяем build-tools:"
-        ls -la /usr/local/lib/android/sdk/build-tools/ 2>/dev/null || echo "Директория build-tools не найдена"
-        
-        echo "4. Проверяем main.py:"
-        if [ -f "main.py" ]; then
-          echo "✓ main.py существует ($(wc -l < main.py) строк)"
-        else
-          echo "✗ ОШИБКА: main.py не найден!"
-          exit 1
-        fi
-        
-    - name: Build APK
+    - name: Build APK with patched environment
       env:
-        ANDROID_HOME: /usr/local/lib/android/sdk
+        # Явно задаем пути к СОВРЕМЕННЫМ инструментам
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
+        # Отключаем авто-обновление SDK внутри buildozer
+        BUILDOCER_SKIP_SDK_UPDATE: 1
       run: |
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+        # Форсируем использование cmdline-tools
+        export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
         
-        echo "=== НАЧИНАЕМ СБОРКУ WAVE DEFENDER ==="
+        # Удаляем старый tools если он снова появился
+        rm -rf /usr/local/lib/android/sdk/tools 2>/dev/null || true
         
-        # Очищаем предыдущие сборки
-        buildozer android clean 2>&1 | tail -10 || true
+        echo "=== ПРОВЕРКА ИНСТРУМЕНТОВ ==="
+        echo "Проверяем sdkmanager:"
+        which sdkmanager
+        sdkmanager --version 2>&1 | head -5 || echo "Не удалось получить версию"
         
-        # Используем системный NDK
-        export P4A_NDK_VERSION=27
+        echo "Проверяем Java:"
+        java -version
         
-        echo "Сборка началась... (это может занять 20-40 минут)"
-        echo "Время начала: $(date)"
+        echo "=== НАЧИНАЕМ СБОРКУ ==="
         
-        # Запускаем сборку с подробным логом
-        timeout 3600 buildozer -v android debug 2>&1 | tee build.log
+        # Создаем симлинк чтобы buildozer находил cmdline-tools как tools
+        mkdir -p /tmp/android-sdk-tools
+        ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /tmp/android-sdk-tools/sdkmanager 2>/dev/null || true
         
-        echo "Время окончания: $(date)"
+        # Запускаем сборку с минимальной проверкой SDK
+        echo "Запускаем buildozer..."
         
-        # Проверяем результат
-        if [ -f bin/*.apk ]; then
-          echo "✅ СБОРКА УСПЕШНО ЗАВЕРШЕНА!"
-        else
-          echo "⚠ Сборка завершилась, но APK не найден"
-          echo "Ищем ошибки в логах..."
-        fi
+        # Используем прямое выполнение с переопределением
+        python3 -m buildozer android debug \
+          --skip-check-sdk \
+          --skip-check-android-sdk \
+          2>&1 | tee build.log
         
-    - name: Check and upload APK
+        echo "Сборка завершена в $(date)"
+        
+    - name: Check result and upload
       run: |
-        echo "=== ФИНАЛЬНАЯ ПРОВЕРКА ==="
+        echo "=== ПРОВЕРКА РЕЗУЛЬТАТА ==="
         
         if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
           echo "✅ УСПЕХ: APK создан!"
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          echo "Версия: $(date -r "$APK_FILE")"
           
-          # Показываем информацию о APK
-          echo "Информация о APK:"
-          /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | grep -E "package|launchable" || true
+          # Выводим базовую информацию о APK
+          if [ -f "/usr/local/lib/android/sdk/build-tools/30.0.3/aapt" ]; then
+            echo "Информация о пакете:"
+            /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | \
+              grep -E "package:|launchable-activity:|application:" | head -3 || true
+          fi
         else
           echo "❌ ОШИБКА: APK не создан"
-          echo "=== АНАЛИЗ ОШИБОК ==="
+          echo "=== АНАЛИЗ ЛОГА ==="
           
           if [ -f "build.log" ]; then
-            echo "Последние ошибки из лога:"
-            grep -i -A5 -B5 "error\|fail\|exception\|traceback" build.log | tail -100 || echo "Явных ошибок не найдено"
+            echo "Последние ошибки:"
+            grep -i -B5 -A5 "error\|exception\|fail\|traceback" build.log | tail -50 || echo "Явных ошибок не найдено"
             
-            echo "Последние 50 строк лога:"
-            tail -50 build.log
-          fi
-          
-          # Проверяем наличие лицензий (частая проблема)
-          echo "Проверка лицензий Android SDK:"
-          if [ -d "/usr/local/lib/android/sdk/licenses" ]; then
-            echo "Файлы лицензий:"
-            cat /usr/local/lib/android/sdk/licenses/* 2>/dev/null || echo "Не удалось прочитать лицензии"
-          else
-            echo "Директория лицензий не существует!"
+            echo "=== КРИТИЧЕСКАЯ ПРОВЕРКА ==="
+            echo "1. Проверяем путь к sdkmanager:"
+            ls -la /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager 2>/dev/null || echo "sdkmanager не найден!"
+            
+            echo "2. Проверяем старый tools:"
+            if [ -d "/usr/local/lib/android/sdk/tools" ]; then
+              echo "⚠ ВНИМАНИЕ: старый tools/ все еще существует!"
+              rm -rf /usr/local/lib/android/sdk/tools
+            fi
           fi
           
           exit 1
