@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04   # ❗ КЛЮЧЕВО
+    runs-on: ubuntu-20.04   # Важно для совместимости
 
     steps:
     - uses: actions/checkout@v4
@@ -29,7 +29,8 @@ jobs:
           python3-pip python3-dev git zip unzip build-essential \
           libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
           libpango1.0-dev libharfbuzz-dev libssl-dev libffi-dev \
-          autoconf automake libtool pkg-config cmake
+          autoconf automake libtool pkg-config cmake \
+          wget unzip  # Добавил wget unzip
 
     - name: Install Buildozer
       run: |
@@ -42,28 +43,40 @@ jobs:
         mkdir -p $ANDROID_SDK_ROOT
         cd $ANDROID_SDK_ROOT
 
+        # Скачиваем и распаковываем Command Line Tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
         rm commandlinetools-linux-9477386_latest.zip
+        
+        # ФИКС: После распаковки создается папка 'cmdline-tools', а не 'tools'
+        # Нужно создать правильную структуру
+        mkdir -p cmdline-tools
+        mv tools cmdline-tools/latest/
 
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/
-
+        # Добавляем в PATH
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        yes | sdkmanager --licenses
+        echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+        
+        # Принимаем лицензии
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
 
-        sdkmanager \
+        # Устанавливаем компоненты
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
           "platform-tools" \
           "platforms;android-31" \
           "build-tools;31.0.0" \
           "ndk;23.1.7779620"
 
+        # Находим точный путь к NDK
+        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*23.1*" | head -1)
+        echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/23.1.7779620" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
 
     - name: Prepare app
       run: |
+        # Создаем main.py
         cat > main.py <<EOF
         from kivy.app import App
         from kivy.uix.label import Label
@@ -72,22 +85,88 @@ jobs:
             def build(self):
                 return Label(text="Hello from CI!")
 
-        TestApp().run()
+        if __name__ == '__main__':
+            TestApp().run()
         EOF
 
+        # Инициализируем buildozer
         buildozer init -y
-        sed -i 's/^requirements.*/requirements = python3,kivy==2.1.0/' buildozer.spec
-        sed -i 's/^android.archs.*/android.archs = armeabi-v7a/' buildozer.spec
-        sed -i 's/^android.api.*/android.api = 31/' buildozer.spec
-        sed -i 's/^android.minapi.*/android.minapi = 21/' buildozer.spec
-        echo -e "\n[buildozer]\nlog_level = 2" >> buildozer.spec
+        
+        # Обновляем buildozer.spec
+        python3 << 'EOF'
+        import configparser
+        import os
+
+        config = configparser.ConfigParser()
+        config.read('buildozer.spec')
+
+        # Обновляем требования
+        config['app']['requirements'] = 'python3,kivy==2.1.0'
+        config['app']['android.archs'] = 'armeabi-v7a'
+        config['app']['android.api'] = '31'
+        config['app']['android.minapi'] = '21'
+
+        # Добавляем настройки buildozer
+        if 'buildozer' not in config:
+            config['buildozer'] = {}
+        config['buildozer']['log_level'] = '2'
+        config['buildozer']['android.accept_sdk_license'] = 'True'
+
+        # Добавляем пути к SDK если они существуют
+        sdk_path = os.environ.get('ANDROID_SDK_ROOT', '')
+        ndk_path = os.environ.get('NDK_PATH', '')
+
+        if sdk_path and os.path.exists(sdk_path):
+            config['app']['android.sdk_path'] = sdk_path
+        if ndk_path and os.path.exists(ndk_path):
+            config['app']['android.ndk_path'] = ndk_path
+
+        with open('buildozer.spec', 'w') as f:
+            config.write(f)
+        EOF
+
+    - name: Increase swap (optional)
+      run: |
+        sudo fallocate -l 2G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        free -h
 
     - name: Build APK
       run: |
-        buildozer -v android debug
+        # Устанавливаем переменные окружения
+        export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+        export ANDROID_HOME="$ANDROID_SDK_ROOT"
+        export ANDROID_NDK_HOME="$NDK_PATH"
+        
+        # Собираем APK
+        buildozer -v android debug 2>&1 | tee build.log
+
+    - name: Check result
+      run: |
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "✅ APK успешно создан!"
+          ls -lh bin/*.apk
+        else
+          echo "❌ APK не найден"
+          echo "Последние 30 строк лога:"
+          tail -30 build.log
+          exit 1
+        fi
 
     - name: Upload APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: apk
+        name: android-apk
         path: bin/*.apk
+        retention-days: 7
+
+    - name: Upload log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+        retention-days: 7
