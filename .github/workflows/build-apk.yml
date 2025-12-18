@@ -13,14 +13,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v2
+    - name: Cache Android NDK and SDK
+      uses: actions/cache@v3
+      id: ndk-cache
       with:
-        api-level: 31
-        build-tools: 31.0.0
-        ndk: 25.2.9519653
-        cmake: 3.22.1
-      
+        path: |
+          ~/.buildozer/android/platform
+          ~/.buildozer/cache
+        key: ${{ runner.os }}-android-ndk-sdk-25b
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -36,6 +37,8 @@ jobs:
           git \
           zip \
           unzip \
+          curl \
+          wget \
           openjdk-17-jdk \
           autoconf \
           libtool \
@@ -48,12 +51,14 @@ jobs:
           libsdl2-mixer-dev \
           libsdl2-ttf-dev
         
-    - name: Install Buildozer and Cython
+    - name: Install Buildozer
       run: |
         pip install buildozer cython
         
     - name: Build APK
       run: |
+        # Если кэш не найден, Buildozer скачает сам
+        # Если кэш найден - использует готовые файлы
         buildozer -v android debug
         
     - name: Upload APK
