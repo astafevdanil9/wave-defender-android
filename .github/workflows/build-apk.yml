@@ -11,28 +11,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup environment with Python 3.9
+    - name: Setup environment
       run: |
         sudo apt update
-        # Добавляем PPA с Python 3.9
-        sudo apt install -y software-properties-common
-        sudo add-apt-repository -y ppa:deadsnakes/ppa
-        sudo apt update
+        sudo apt install -y python3-pip python3-venv python3-dev
         
-        # Устанавливаем Python 3.9
-        sudo apt install -y python3.9 python3.9-dev python3.9-venv python3.9-distutils
-        
-        # Создаем виртуальное окружение
-        python3.9 -m venv venv
+        # Используем Python 3.10 который уже есть в Ubuntu 22.04
+        python3 -m venv venv
         source venv/bin/activate
         
-        # Устанавливаем зависимости
         pip install --upgrade pip setuptools wheel
         pip install buildozer cython==0.29.33 pygame==2.5.0
-        
-        echo "✅ Python 3.9 и зависимости установлены"
     
-    - name: Create buildozer.spec with Python 3.9
+    - name: Create buildozer.spec (фикс через p4a)
       run: |
         source venv/bin/activate
         
@@ -44,89 +35,68 @@ jobs:
         source.dir = .
         source.main = main.py
         version = 1.0
-        requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0, sdl2_ttf
+        requirements = python3, pygame==2.5.0, sdl2_ttf
         orientation = landscape
         fullscreen = 1
-        android.archs = armeabi-v7a
+        android.archs = arm64-v8a  # Меняем на arm64-v8a
         android.permissions = INTERNET, VIBRATE
-        android.api = 29
+        android.api = 30
         android.minapi = 21
 
         [buildozer]
         warn_on_root = 0
         log_level = 2
         android.accept_sdk_license = True
+
+        # КРИТИЧЕСКИ ВАЖНО: используем develop ветку p4a
+        p4a.branch = develop
+        p4a.commit = 2024.01.29  # Специфичный коммит для pygame
+
+        # Фикс для сборки pygame
+        android.add_src = {
+            "pygame": {
+                "recipe": "pygame",
+                "version": "2.5.0"
+            }
+        }
         EOF
         
-        echo "✅ buildozer.spec создан с Python 3.9.18"
-        cat buildozer.spec
+        echo "✅ buildozer.spec создан с фиксами для pygame"
     
-    - name: Accept ALL Android licenses
+    - name: Accept licenses via sdkmanager
       run: |
-        mkdir -p ~/.android/licenses
-          cat > ~/.android/licenses/android-sdk-license << 'LICENSES'
-        8933bad161af4178b1185d1a37fbf41ea5269c55
-        d56f5187479451eabf01fb78af6dfcb131a6481e
-        84831b9409646a918e30573bab4c9c91346d8abd
-        24333f8a63b6825ea9c5514f83c2829b004d1fee
-        LICENSES
-                
-                echo "✅ Лицензии Android приняты"
-            
+        # Создаем директории Android SDK если нет
+        mkdir -p ~/android-sdk/cmdline-tools/latest
+        
+        # Скачиваем Command Line Tools
+        cd ~/android-sdk
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mv cmdline-tools latest
+        mv latest cmdline-tools/
+        rm commandlinetools-linux-9477386_latest.zip
+        
+        # Принимаем ВСЕ лицензии автоматически
+        yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+        
+        echo "✅ Все лицензии приняты через sdkmanager"
+    
     - name: Build APK
-      timeout-minutes: 60
       run: |
         source venv/bin/activate
         
-        # Увеличиваем swap
-        sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 2G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        echo "=== Начинаем сборку ==="
+        buildozer android debug
         
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
-        
-        # Запускаем сборку
-        buildozer -v android debug 2>&1 | tee build.log
-        
-        # Если ошибка, пробуем без sdl2_ttf
-        if grep -q "longintrepr.h\|error" build.log && [ ! -f bin/*.apk ]; then
-          echo "⚠️  Пробуем без sdl2_ttf..."
-          sed -i 's/requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0, sdl2_ttf/requirements = python3==3.9.18, hostpython3==3.9.18, pygame==2.5.0/' buildozer.spec
-          rm -rf .buildozer/android/platform/build-armeabi-v7a 2>/dev/null || true
-          buildozer -v android debug 2>&1 | tee -a build.log
-        fi
-        
-        # Убираем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
-        
-        # Проверяем результат
-        echo "=== Результат сборки ==="
-        if ls bin/*.apk 1>/dev/null 2>&1; then
-          APK_FILE=$(ls bin/*.apk | head -1)
-          echo "✅ УСПЕХ: APK создан!"
-          echo "Файл: $APK_FILE"
-          echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-        else
-          echo "❌ APK не создан"
-          echo "=== Ключевые ошибки ==="
-          grep -i "error\|fail\|longintrepr\|cython" build.log | tail -20
-        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: wave-defender
         path: bin/*.apk
-        if-no-files-found: warn
-    
-    - name: Upload build log
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-debug-log
-        path: build.log
