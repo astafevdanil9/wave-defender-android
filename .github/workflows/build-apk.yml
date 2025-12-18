@@ -1,4 +1,4 @@
-name: Build Wave Defender with PyGame
+name: Build Wave Defender APK
 
 on:
   push:
@@ -11,135 +11,57 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install Python and dependencies
+    - name: Setup environment
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-dev python3-venv
+        sudo apt install -y python3-pip python3-venv
         
-        # Создаем виртуальное окружение
         python3 -m venv venv
         source venv/bin/activate
-        
-        # Устанавливаем ВСЕ зависимости
-        pip install --upgrade pip setuptools wheel
-        pip install cython==0.29.36
-        pip install buildozer
-        pip install pygame==2.5.0
-        
-        echo "✅ Зависимости установлены"
-        
-    - name: Configure buildozer.spec
+        pip install buildozer cython pygame
+    
+    - name: Create buildozer.spec
       run: |
         source venv/bin/activate
         
-        # Используем ваш существующий spec или создаем новый
-        if [ ! -f buildozer.spec ]; then
-          echo "Создаю buildozer.spec..."
+        # ПРАВИЛЬНЫЙ heredoc - без отступов внутри
           cat > buildozer.spec << 'EOF'
-          [app]
-          title = Wave Defender
-          package.name = wavedefender
-          package.domain = com.astafevdanil9
-          source.dir = .
-          source.main = main.py
-          version = 1.0
-          requirements = python3,pygame
-          orientation = landscape
-          fullscreen = 1
-          android.archs = armeabi-v7a
-          android.permissions = INTERNET, VIBRATE
-          android.api = 30
-          android.minapi = 21
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = com.astafevdanil9
+        source.dir = .
+        version = 1.0
+        requirements = python3,pygame
+        android.api = 30
+        android.minapi = 21
+        android.archs = armeabi-v7a
 
-          [buildozer]
-          warn_on_root = 0
-          log_level = 2
-          android.accept_sdk_license = True
-          EOF
-        else
-          echo "Использую существующий buildozer.spec"
-          
-          # Исправляем существующий файл если нужно (ПРОСТОЙ ВАРИАНТ)
-          python3 -c "
-          import configparser
-          import os
-
-          if os.path.exists('buildozer.spec'):
-              try:
-                  config = configparser.ConfigParser()
-                  config.read('buildozer.spec')
-                  
-                  # Убеждаемся что есть обязательные поля
-                  if 'app' not in config:
-                      config['app'] = {}
-                  
-                  # Добавляем version если нет
-                  if 'version' not in config['app']:
-                      config['app']['version'] = '1.0'
-                  
-                  # Добавляем buildozer секцию если нет
-                  if 'buildozer' not in config:
-                      config['buildozer'] = {}
-                  
-                  config['buildozer']['warn_on_root'] = '0'
-                  config['buildozer']['android.accept_sdk_license'] = 'True'
-                  
-                  with open('buildozer.spec', 'w') as f:
-                      config.write(f)
-                  
-                  print('✅ buildozer.spec обновлен')
-              except Exception as e:
-                  print(f'⚠️  Ошибка при обновлении: {e}')
-          else:
-              print('⚠️  Файл buildozer.spec не найден')
-          "
-                  fi
+        [buildozer]
+        warn_on_root = 0
+        android.accept_sdk_license = True
+        EOF
         
-        echo "=== Проверка конфига ==="
+        echo "✅ buildozer.spec создан"
         cat buildozer.spec
     
-    - name: Accept Android licenses
-      run: |
-        # Принимаем лицензии Android SDK
-        mkdir -p ~/.android/licenses
-        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
-        
     - name: Build APK
-      timeout-minutes: 60
       run: |
         source venv/bin/activate
         
-        # Увеличиваем swap
-        sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 2G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        echo "=== Запуск buildozer ==="
-        
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
-        
-        # Запускаем сборку с логом
-        buildozer -v android debug 2>&1 | tee build.log
+        buildozer android debug
         
         sudo swapoff /swapfile
         sudo rm /swapfile
-        
-        # Проверка
-        echo "=== Результат сборки ==="
-        if [ -f bin/*.apk ]; then
-          echo "✅ УСПЕХ: APK создан!"
-          ls -lh bin/*.apk
-        else
-          echo "❌ Ошибка: APK не создан"
-          echo "Последние 50 строк лога:"
-          tail -50 build.log
-        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-game
+        name: wave-defender
         path: bin/*.apk
         if-no-files-found: warn
