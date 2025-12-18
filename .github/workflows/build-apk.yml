@@ -9,25 +9,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Забираем код
       - uses: actions/checkout@v4
 
-      # Java 17
+      # 2. Установка Java 17
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # Android SDK
+      # 3. Установка Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # Android NDK (через sdkmanager)
-      - name: Install Android NDK
-        run: |
-          sdkmanager "ndk;21.3.6528147"
-
-      # Системные зависимости
+      # 4. Системные зависимости
       - name: Install system dependencies
         run: |
           sudo apt update
@@ -40,65 +36,154 @@ jobs:
             unzip \
             libffi-dev \
             libssl-dev \
-            cython3
+            cython3 \
+            build-essential \
+            zlib1g-dev
 
-      # Buildozer
+      # 5. Установка Buildozer и зависимостей Python
       - name: Install Buildozer
         run: |
-          pip3 install --user buildozer
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          pip3 install --upgrade pip
+          pip3 install buildozer
+          pip3 install cython==0.29.33
+          pip3 install virtualenv
+          pip3 install kivy==2.1.0
 
-      # Лицензии Android
-      - name: Accept Android licenses
+      # 6. Установка NDK, Build-tools и платформ Android
+      - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses
+          echo "=== Accept Android licenses ==="
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
 
-      # Подготовка приложения (YAML-safe)
-      - name: Prepare app
+          echo "=== Installing components ==="
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;21.3.6528147" \
+            "build-tools;31.0.0" \
+            "platforms;android-31" \
+            "platform-tools"
+
+      # 7. Проверка наличия NDK и Build-tools
+      - name: Verify Android components
         run: |
-          if [ ! -f buildozer.spec ]; then
-            cat > buildozer.spec <<'EOF'
-[app]
-title = TestApp
-package.name = testapp
-package.domain = org.example
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-version = 0.1
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | grep 21.3 | head -1)
+          if [ -z "$NDK_PATH" ]; then
+            echo "❌ NDK not found!"
+            find $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null
+            exit 1
+          fi
+          echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
 
-requirements = python3,kivy
-orientation = portrait
-
-android.api = 30
-android.minapi = 21
-android.ndk = 21
-android.archs = armeabi-v7a,arm64-v8a
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
-EOF
+          BUILD_TOOLS_DIR="$ANDROID_SDK_ROOT/build-tools/31.0.0"
+          if [ ! -d "$BUILD_TOOLS_DIR" ]; then
+            echo "❌ Build-tools directory not found!"
+            ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "No build-tools"
+            exit 1
           fi
 
-          cat > main.py <<'EOF'
-from kivy.app import App
-from kivy.uix.label import Label
+          for bin in aapt zipalign aidl; do
+            if [ ! -f "$BUILD_TOOLS_DIR/$bin" ]; then
+              echo "❌ $bin not found in build-tools"
+              exit 1
+            fi
+          done
+          echo "✅ Android components verified"
 
-class TestApp(App):
-    def build(self):
-        return Label(text="Hello from APK")
-
-TestApp().run()
-EOF
-
-      # Сборка APK
-      - name: Build APK
+      # 8. Подготовка main.py и buildozer.spec
+      - name: Prepare application files
         run: |
-          buildozer android debug
+          # main.py
+          cat > main.py <<'EOF'
+          from kivy.app import App
+          from kivy.uix.label import Label
 
-      # Артефакт
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk
-          path: bin/*.apk
+          class TestApp(App):
+              def build(self):
+                  return Label(text="Hello from CI Build! Version 1.0")
+
+          if __name__ == '__main__':
+              TestApp().run()
+          EOF
+
+          # buildozer.spec
+          cat > buildozer.spec <<'EOF'
+          [app]
+          title = TestApp
+          package.name = testapp
+          package.domain = org.example
+          source.dir = .
+          source.include_exts = py,png,jpg,kv,atlas
+          version = 1.0
+          requirements = python3,kivy==2.1.0
+          orientation = portrait
+          android.api = 31
+          android.minapi = 21
+          android.sdk_path = __ANDROID_SDK_ROOT__
+          android.ndk_path = __ANDROID_NDK_PATH__
+          android.arch = armeabi-v7a
+
+          [buildozer]
+          log_level = 2
+          warn_on_root = 1
+          android.accept_sdk_license = True
+
+          [android]
+          [android:permissions]
+          android.permission.INTERNET
+          EOF
+
+                # Подставляем реальные пути
+                sed -i "s|__ANDROID_SDK_ROOT__|${ANDROID_SDK_ROOT//cmdline-tools/latest}|g" buildozer.spec
+                sed -i "s|__ANDROID_NDK_PATH__|${NDK_PATH//ndk}|g" buildozer.spec
+
+                echo "main.py and buildozer.spec prepared"
+
+            # 9. Настройка переменных окружения
+            - name: Setup environment variables
+              run: |
+                echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+                echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+                echo "JAVA_HOME_17_X64=$JAVA_HOME_17_X64" >> $GITHUB_ENV
+
+                echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+                echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+                echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
+
+            # 10. Финальная проверка путей перед сборкой
+            - name: Final verification before build
+              run: |
+                for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME_17_X64"; do
+                  if [ ! -d "$path" ]; then
+                    echo "❌ Path does not exist: $path"
+                    exit 1
+                  fi
+                done
+                echo "✅ All required paths exist"
+
+            # 11. Сборка APK
+            - name: Build APK
+              run: |
+                buildozer -v android debug
+
+            # 12. Загрузка APK как артефакт
+            - name: Upload APK
+              uses: actions/upload-artifact@v4
+              with:
+                name: android-apk
+                path: bin/*.apk
+                if-no-files-found: error
+
+            # 13. Отладка при ошибке
+            - name: Debug on failure
+              if: failure()
+              run: |
+                echo "=== Debug info ==="
+                ls -la
+                find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+                echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+                echo "NDK_PATH: $NDK_PATH"
+                echo "JAVA_HOME_17_X64: $JAVA_HOME_17_X64"
+
+                if [ -f ".buildozer/android/platform/build.log" ]; then
+                  echo "=== Last 100 lines of Buildozer log ==="
+                  tail -100 .buildozer/android/platform/build.log
+                fi
