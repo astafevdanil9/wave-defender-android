@@ -1,4 +1,4 @@
-name: Build Wave Defender APK
+name: Build Wave Defender with PyGame
 
 on:
   push:
@@ -11,98 +11,83 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
+    - name: Install Python and dependencies
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-dev git wget curl
-        pip3 install buildozer
+        sudo apt install -y python3-pip python3-dev python3-venv
         
-    - name: Create CORRECT buildozer.spec
+        # Создаем виртуальное окружение
+        python3 -m venv venv
+        source venv/bin/activate
+        
+        # Устанавливаем ВСЕ зависимости
+        pip install --upgrade pip setuptools wheel
+        pip install cython==0.29.36  # Обязательно!
+        pip install buildozer
+        pip install pygame==2.5.0
+        
+        echo "✅ Зависимости установлены"
+        
+    - name: Configure buildozer.spec
       run: |
-        # Удаляем старый файл
-        rm -f buildozer.spec
+        source venv/bin/activate
         
-        # Создаем ПРАВИЛЬНЫЙ конфиг - используем ТОЛЬКО version (без version.regex)
-        cat > buildozer.spec << 'EOF'
-        [app]
-        title = Wave Defender
-        package.name = wavedefender
-        package.domain = com.astafevdanil9
-        source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 1.0.0  # ✅ ТОЛЬКО version, без version.regex!
-        requirements = python3
-        orientation = landscape
-        fullscreen = 1
-        android.archs = armeabi-v7a
-        android.permissions = INTERNET, VIBRATE
-        android.api = 30
-        android.minapi = 21
+        # Используем ваш существующий spec или создаем новый
+        if [ ! -f buildozer.spec ]; then
+          echo "Создаю buildozer.spec..."
+          cat > buildozer.spec << 'EOF'
+          [app]
+          title = Wave Defender
+          package.name = wavedefender
+          package.domain = com.astafevdanil9
+          source.dir = .
+          source.main = main.py
+          version = 1.0
+          requirements = python3,pygame
+          orientation = landscape
+          fullscreen = 1
+          android.archs = armeabi-v7a
+          android.permissions = INTERNET, VIBRATE
+          android.api = 30
+          android.minapi = 21
 
-        [buildozer]
-        warn_on_root = 0
-        log_level = 2
-        android.accept_sdk_license = True
-        EOF
+          [buildozer]
+          warn_on_root = 0
+          log_level = 2
+          android.accept_sdk_license = True
+          EOF
+        else
+          echo "Использую существующий buildozer.spec"
+        fi
         
-        # Создаем простой main.py
-        echo '# Wave Defender Game' > main.py
-        echo 'print("Wave Defender Android v1.0.0")' >> main.py
-        
-        echo "✅ Конфиг создан"
-        echo "=== Проверка полей ==="
-        grep -E "^(version|requirements|android\.)" buildozer.spec
+        echo "=== Проверка конфига ==="
+        grep -E "^(version|requirements)" buildozer.spec
     
-    - name: Setup environment
-      run: |
-        mkdir -p ~/.android/licenses
-        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
-        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
-        
     - name: Build APK
-      timeout-minutes: 45
       run: |
+        source venv/bin/activate
+        
         # Увеличиваем swap
         sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        echo "=== Начинаем сборку ==="
+        echo "=== Запуск buildozer ==="
+        buildozer android debug
         
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
-        
-        # Запускаем сборку
-        buildozer -v android debug 2>&1 | tee build.log
-        
-        # Проверяем результат
-        echo "=== Проверка результата ==="
-        if ls bin/*.apk 1>/dev/null 2>&1; then
-          APK_FILE=$(ls bin/*.apk | head -1)
-          echo "✅ УСПЕХ: APK создан!"
-          echo "Файл: $APK_FILE"
-          echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-        else
-          echo "❌ APK не создан"
-          echo "=== Ошибки из лога ==="
-          tail -50 build.log | grep -i "error\|fail\|warn" || echo "Явных ошибок не найдено"
-        fi
-        
-        # Убираем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
+        
+        # Проверка
+        if [ -f bin/*.apk ]; then
+          echo "✅ Готово!"
+        else
+          echo "❌ Ошибка"
+        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-android
+        name: wave-defender-game
         path: bin/*.apk
-        if-no-files-found: warn
-    
-    - name: Upload build log
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-debug-log
-        path: build.log
