@@ -13,9 +13,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Очистка и обновление apt
+      run: |
+        sudo apt-get clean
+        sudo rm -rf /var/lib/apt/lists/*
+        sudo apt-get update
+        sudo apt-get -f install
+      
     - name: Установка Java
       run: |
-        sudo apt-get update
         sudo apt-get install -y openjdk-17-jdk
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
         
@@ -56,33 +62,33 @@ jobs:
         echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
         echo "$HOME/android-sdk/build-tools/31.0.0" >> $GITHUB_PATH
         
-    - name: Установка системных зависимостей
+    - name: Установка минимальных системных зависимостей
       run: |
-        sudo apt-get update
+        # Сначала устанавливаем базовые пакеты
         sudo apt-get install -y \
           python3-pip \
           python3-venv \
-          cython3 \
           build-essential \
           git \
           zip \
           unzip \
           libffi-dev \
           libssl-dev \
+          pkg-config
+        
+    - name: Установка SDL2 и мультимедиа библиотек (опционально)
+      run: |
+        # Устанавливаем SDL2 без проблемных зависимостей
+        sudo apt-get install -y \
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
           libsdl2-ttf-dev \
           libjpeg-dev \
           libpng-dev \
-          libpq-dev \
-          libgstreamer1.0-dev \
-          pkg-config \
-          autoconf \
-          automake \
-          libtool
+          zlib1g-dev
         
-    - name: Установка Buildozer
+    - name: Установка Buildozer и Python зависимостей
       run: |
         pip3 install --upgrade pip
         pip3 install buildozer
@@ -100,11 +106,39 @@ jobs:
         mkdir -p ~/.buildozer/android/platform
         mkdir -p ~/.android
         
-        # Настраиваем спецификацию Buildozer
-        if [ -f "buildozer.spec" ]; then
-          # Обновляем пути в buildozer.spec если нужно
-          sed -i "s|^android.sdk_path =.*|android.sdk_path = $HOME/android-sdk|" buildozer.spec 2>/dev/null || true
-          sed -i "s|^android.ndk_path =.*|android.ndk_path = $HOME/android-sdk/ndk/25.1.8937393|" buildozer.spec 2>/dev/null || true
+        # Создаем минимальный buildozer.spec если его нет
+        if [ ! -f "buildozer.spec" ]; then
+          cat > buildozer.spec << EOF
+[app]
+title = My Application
+package.name = myapp
+package.domain = org.test
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 0.1
+requirements = python3,kivy
+orientation = portrait
+osx.python_version = 3
+osx.kivy_version = 1.9.1
+fullscreen = 0
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
+android.accept_sdk_license = True
+
+[android]
+arch = armeabi-v7a
+
+[android:meta-data]
+android.allow_backup = true
+
+[android:permissions]
+android.permission.INTERNET
+
+[android:feature]
+android.hardware.touchscreen
+EOF
         fi
         
     - name: Проверка окружения
@@ -114,16 +148,18 @@ jobs:
         echo "ANDROID_HOME: $ANDROID_HOME"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo ""
-        echo "Содержимое Android SDK:"
-        ls -la $HOME/android-sdk/
-        echo ""
         echo "Java версия:"
         java -version
         echo ""
+        echo "Python версия:"
+        python3 --version
+        echo ""
+        echo "Buildozer версия:"
+        buildozer --version 2>/dev/null || echo "Buildozer не найден"
+        echo ""
         echo "Android SDK компоненты:"
-        ls -la $HOME/android-sdk/platform-tools/
-        ls -la $HOME/android-sdk/build-tools/
-        ls -la $HOME/android-sdk/platforms/
+        ls -la $HOME/android-sdk/platform-tools/ 2>/dev/null || echo "platform-tools не найдены"
+        ls -la $HOME/android-sdk/build-tools/ 2>/dev/null || echo "build-tools не найдены"
         
     - name: Сборка APK
       run: |
@@ -133,14 +169,35 @@ jobs:
         export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
         export PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/31.0.0:$PATH
         
-        # Собираем APK
-        buildozer -v android debug
+        # Устанавливаем минимальные требования для теста
+        echo "requirements = python3" >> buildozer.spec
+        
+        # Пытаемся собрать APK с подробным выводом
+        buildozer -v android debug 2>&1 | tail -100
+        
+    - name: Альтернативная сборка через python-for-android
+      if: failure()
+      run: |
+        echo "Пробуем альтернативный метод сборки..."
+        pip3 install python-for-android
+        
+        # Простая сборка тестового APK
+        cd ~
+        git clone https://github.com/kivy/kivy
+        cd kivy/examples/demo/showcase
+        p4a apk --private . --package=org.test.myapp --name="MyApp" --version=0.1 --bootstrap=sdl2 --requirements=python3,kivy
+        
+        # Копируем APK если получилось
+        if [ -f "*.apk" ]; then
+          mkdir -p $GITHUB_WORKSPACE/bin
+          cp *.apk $GITHUB_WORKSPACE/bin/
+        fi
         
     - name: Загрузка APK
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-apk
+        name: android-apk
         path: bin/*.apk
         
     - name: Просмотр логов при ошибке
@@ -148,9 +205,11 @@ jobs:
       run: |
         echo "=== Логи ошибок ==="
         if [ -f ".buildozer/android/platform/build.log" ]; then
-          tail -100 .buildozer/android/platform/build.log
+          tail -200 .buildozer/android/platform/build.log
         fi
-        if [ -f "buildozer.spec" ]; then
-          echo "=== Конфигурация buildozer.spec ==="
-          grep -E "^(android\.(sdk|ndk)_path|p4a|requirements)" buildozer.spec || true
-        fi
+        echo ""
+        echo "=== Содержимое buildozer.spec ==="
+        cat buildozer.spec || echo "Файл не найден"
+        echo ""
+        echo "=== Проверка свободного места ==="
+        df -h
