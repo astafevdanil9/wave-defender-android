@@ -12,58 +12,40 @@ jobs:
       # 1. Забираем код
       - uses: actions/checkout@v4
 
-      # 2. Подготовка main.py
-      - name: Create main.py
-        run: |
-          cat > main.py << 'EOF'
-          from kivy.app import App
-          from kivy.uix.label import Label
-
-          class TestApp(App):
-              def build(self):
-                  return Label(text="Hello from CI Build!")
-
-          if __name__ == '__main__':
-              TestApp().run()
-          EOF
-
-      # 3. Подготовка buildozer.spec
-      - name: Create buildozer.spec
-        run: |
-          cat > buildozer.spec << 'EOF'
-          [app]
-          title = TestApp
-          package.name = testapp
-          package.domain = org.example
-          source.dir = .
-          source.include_exts = py,png,jpg,kv,atlas
-          version = 1.0
-          requirements = python3,kivy
-          orientation = portrait
-          android.api = 33
-          android.minapi = 21
-          android.archs = armeabi-v7a
-
-          [buildozer]
-          log_level = 2
-          android.accept_sdk_license = True
-          EOF
-
-      # 4. Сборка APK через Docker Buildozer
-      - name: Build APK (Docker)
-        uses: docker://pybee/buildozer:latest
+      # 2. Настройка Python (локально не используется, но удобно для зависимостей)
+      - name: Setup Python 3.9
+        uses: actions/setup-python@v4
         with:
-          options: >
-            --rm
-            -v ${{ github.workspace }}:/app
-        run: |
-          cd /app
-          buildozer android debug
+          python-version: '3.9'
 
-      # 5. Загрузка APK
+      # 3. Сборка APK через Docker Buildozer
+      - name: Build APK (Docker)
+        run: |
+          echo "=== Запуск Buildozer в Docker ==="
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            pybee/buildozer:latest \
+            /bin/bash -c "buildozer android debug"
+          
+      # 4. Загрузка APK как артефакт
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
+          name: apk
           path: bin/*.apk
           if-no-files-found: warn
+
+      # 5. Отладка при ошибке
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== ОТЛАДКА ==="
+          echo "1. Содержимое проекта:"
+          ls -la
+          echo ""
+          echo "2. Проверка bin/*.apk:"
+          ls -la bin/*.apk 2>/dev/null || echo "APK не создан"
+          echo ""
+          echo "3. Проверка Buildozer версии:"
+          docker run --rm pybee/buildozer:latest buildozer --version
