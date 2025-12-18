@@ -12,94 +12,54 @@ jobs:
     # 1. Забираем код
     - uses: actions/checkout@v4
 
-    # 2. Установка Python 3.9 (совместимая с Kivy)
+    # 2. Установка Python 3.9
     - name: Setup Python 3.9
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    # 3. Установка Java 17 (основная версия для сборки)
+    # 3. Установка Java 17
     - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    # 4. Установка Android SDK
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
-    # 5. Создание структуры каталогов для Buildozer
-    - name: Create SDK directory structure for Buildozer
+    # 4. СКАЧИВАНИЕ И УСТАНОВКА ANDROID COMMAND LINE TOOLS С НУЛЯ
+    - name: Download and setup Android Command Line Tools
       run: |
-        echo "=== Создание структуры каталогов для Buildozer ==="
+        echo "=== Скачивание Android Command Line Tools ==="
         
-        # Основной путь, который ожидает Buildozer
-        SDK_BASE_DIR="/usr/local/lib/android/sdk"
+        # Удаляем старые SDK если есть
+        sudo rm -rf /usr/local/lib/android/sdk 2>/dev/null || true
         
-        # Убеждаемся, что базовая директория существует
-        sudo mkdir -p "$SDK_BASE_DIR"
+        # Создаем директорию
+        sudo mkdir -p /usr/local/lib/android/sdk
         
-        # Создаем симлинки на реальные Android SDK компоненты
-        echo "Создаем ссылки на реальные Android SDK компоненты..."
+        # Скачиваем Command Line Tools
+        cd /usr/local/lib/android/sdk
+        sudo wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        sudo unzip -q commandlinetools-linux-9477386_latest.zip
         
-        # Ссылка на platform-tools
-        if [ -d "$ANDROID_SDK_ROOT/platform-tools" ]; then
-          sudo ln -sf "$ANDROID_SDK_ROOT/platform-tools" "$SDK_BASE_DIR/platform-tools"
-          echo "✅ platform-tools ссылка создана"
-        fi
+        # Создаем правильную структуру
+        sudo mkdir -p cmdline-tools
+        sudo mv tools cmdline-tools/latest
         
-        # Ссылка на build-tools
-        if [ -d "$ANDROID_SDK_ROOT/build-tools" ]; then
-          sudo ln -sf "$ANDROID_SDK_ROOT/build-tools" "$SDK_BASE_DIR/build-tools"
-          echo "✅ build-tools ссылка создана"
-        fi
+        # Устанавливаем переменные окружения
+        echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         
-        # Ссылка на platforms
-        if [ -d "$ANDROID_SDK_ROOT/platforms" ]; then
-          sudo ln -sf "$ANDROID_SDK_ROOT/platforms" "$SDK_BASE_DIR/platforms"
-          echo "✅ platforms ссылка создана"
-        fi
-        
-        # Ссылка на ndk
-        if [ -d "$ANDROID_SDK_ROOT/ndk" ]; then
-          sudo ln -sf "$ANDROID_SDK_ROOT/ndk" "$SDK_BASE_DIR/ndk"
-          echo "✅ ndk ссылка создана"
-        fi
-        
-        # Создаем директорию tools/bin, которую ожидает Buildozer
-        TOOLS_BIN_DIR="$SDK_BASE_DIR/tools/bin"
-        sudo mkdir -p "$TOOLS_BIN_DIR"
-        
-        # Находим современный sdkmanager
-        MODERN_SDKMANAGER=""
-        if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          MODERN_SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-        elif [ -f "$ANDROID_SDK_ROOT/cmdline-tools/bin/sdkmanager" ]; then
-          MODERN_SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/bin/sdkmanager"
-        fi
-        
-        if [ -n "$MODERN_SDKMANAGER" ]; then
-          echo "Копируем современный sdkmanager в $TOOLS_BIN_DIR/"
-          sudo cp "$MODERN_SDKMANAGER" "$TOOLS_BIN_DIR/"
-          sudo chmod +x "$TOOLS_BIN_DIR/sdkmanager"
-          echo "✅ sdkmanager скопирован"
-        else
-          echo "⚠️ Современный sdkmanager не найден, создадим позже"
-        fi
-        
-        echo "✅ Структура каталогов создана"
+        echo "✅ Android Command Line Tools установлены"
 
-    # 6. Установка Java 8 для обратной совместимости
+    # 5. Установка Java 8 для совместимости
     - name: Setup Java 8 for compatibility
       run: |
         echo "=== Установка Java 8 ==="
         sudo apt update
         sudo apt install -y openjdk-8-jdk
-        echo "JAVA8_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
         echo "✅ Java 8 установлена"
 
-    # 7. Системные зависимости для сборки Kivy и Buildozer
+    # 6. Системные зависимости
     - name: Install system dependencies
       run: |
         sudo apt update
@@ -114,7 +74,7 @@ jobs:
           libpango1.0-dev libharfbuzz-dev
         echo "✅ Системные зависимости установлены"
 
-    # 8. Установка Buildozer и зависимостей Python
+    # 7. Установка Buildozer и Python пакетов
     - name: Install Buildozer and Python packages
       run: |
         echo "=== Установка Buildozer и Python пакетов ==="
@@ -123,153 +83,111 @@ jobs:
         pip install "kivy[base]" kivy_examples --pre --extra-index-url https://kivy.org/downloads/simple/
         echo "✅ Buildozer и зависимости установлены"
 
-    # 9. Установка Android компонентов БЕЗ автоматического принятия лицензий
-    - name: Install Android SDK components
+    # 8. ПРИНЯТИЕ ЛИЦЕНЗИЙ И УСТАНОВКА КОМПОНЕНТОВ
+    - name: Accept licenses and install Android components
       run: |
-        echo "=== Установка Android компонентов ==="
+        echo "=== Принятие лицензий и установка компонентов ==="
         
-        # Сначала проверяем и устанавливаем современные Command Line Tools если нужно
-        if [ ! -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "Устанавливаем Android Command Line Tools..."
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          cd "$ANDROID_SDK_ROOT/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
-          
-          if [ -d "cmdline-tools" ]; then
-            mv cmdline-tools latest
-          elif [ -d "tools" ]; then
-            mv tools latest
-          fi
-          
-          # Копируем в путь для Buildozer
-          sudo cp "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "/usr/local/lib/android/sdk/tools/bin/sdkmanager"
-          sudo chmod +x "/usr/local/lib/android/sdk/tools/bin/sdkmanager"
-        fi
-        
-        # Используем сконфигурированный путь
-        SDKMANAGER_CMD="/usr/local/lib/android/sdk/tools/bin/sdkmanager"
+        SDKMANAGER_CMD="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
         
         if [ ! -f "$SDKMANAGER_CMD" ]; then
           echo "❌ sdkmanager не найден!"
+          ls -la /usr/local/lib/android/sdk/cmdline-tools/latest/bin/ 2>/dev/null || echo "Директория не существует"
           exit 1
         fi
         
-        echo "✅ Используем sdkmanager: $SDKMANAGER_CMD"
+        echo "✅ sdkmanager найден: $SDKMANAGER_CMD"
         
-        # ПРИНЯТИЕ ЛИЦЕНЗИЙ - более надежный способ
-        echo "Принимаем лицензии Android..."
-        
-        # Создаем файл с принятыми лицензиями
+        # СОЗДАЕМ ФАЙЛ ЛИЦЕНЗИЙ ДЛЯ АВТОПРИНЯТИЯ
+        echo "Создаем файл лицензий..."
         mkdir -p ~/.android
         cat > ~/.android/repositories.cfg << 'EOF'
         ### User Sources for Android SDK Manager
         count=0
         EOF
         
-        # Альтернативный способ принять лицензии
+        # Добавляем основные хеши лицензий
         echo "8933bad161af4178b1185d1a37fbf41ea5269c55" >> ~/.android/repositories.cfg
         echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/repositories.cfg
-        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> ~/.android/repositories.cfg
         
-        # Устанавливаем компоненты с явным --sdk_root
+        # ПРИНИМАЕМ ЛИЦЕНЗИИ С ПОМОЩЬЮ ЭХО
+        echo "Принимаем лицензии..."
+        echo -e "y\ny\ny\ny\ny\ny\ny\ny\n" | $SDKMANAGER_CMD --licenses > /dev/null 2>&1 || true
+        
+        # УСТАНАВЛИВАЕМ КОМПОНЕНТЫ ПО ОДНОМУ
         echo "Устанавливаем platform-tools..."
-        $SDKMANAGER_CMD --sdk_root=/usr/local/lib/android/sdk "platform-tools"
+        $SDKMANAGER_CMD "platform-tools" --verbose
         
         echo "Устанавливаем build-tools..."
-        $SDKMANAGER_CMD --sdk_root=/usr/local/lib/android/sdk "build-tools;31.0.0"
+        $SDKMANAGER_CMD "build-tools;31.0.0" --verbose
         
         echo "Устанавливаем platform..."
-        $SDKMANAGER_CMD --sdk_root=/usr/local/lib/android/sdk "platforms;android-31"
+        $SDKMANAGER_CMD "platforms;android-31" --verbose
         
         echo "Устанавливаем NDK..."
-        $SDKMANAGER_CMD --sdk_root=/usr/local/lib/android/sdk "ndk;21.3.6528147"
+        $SDKMANAGER_CMD "ndk;21.3.6528147" --verbose
         
-        echo "✅ Все компоненты Android SDK установлены"
+        echo "✅ Все компоненты установлены"
 
-    # 10. Проверка наличия NDK и Build-tools
-    - name: Verify Android components
+    # 9. ПРОВЕРКА КОМПОНЕНТОВ И НАСТРОЙКА ДЛЯ BUILDOZER
+    - name: Verify components and setup for Buildozer
       run: |
-        echo "=== Проверка Android компонентов ==="
+        echo "=== Проверка компонентов и настройка для Buildozer ==="
         
-        # Проверяем NDK
-        NDK_PATH="/usr/local/lib/android/sdk/ndk/21.3.6528147"
-        if [ ! -d "$NDK_PATH" ]; then
-          echo "Поиск NDK..."
-          # Ищем NDK по разным возможным путям
-          POSSIBLE_PATHS=(
-            "/usr/local/lib/android/sdk/ndk-bundle"
-            "$ANDROID_SDK_ROOT/ndk/21.3.6528147"
-            "$ANDROID_SDK_ROOT/ndk-bundle"
-            "/usr/local/lib/android/sdk/ndk/*"
-          )
-          
-          for path in "${POSSIBLE_PATHS[@]}"; do
-            if [ -d "$path" ] 2>/dev/null; then
-              NDK_PATH="$path"
-              break
-            fi
-          done
-          
-          if [ ! -d "$NDK_PATH" ]; then
-            # Находим первую попавшуюся NDK директорию
-            NDK_PATH=$(find /usr/local/lib/android/sdk $ANDROID_SDK_ROOT -name "*ndk*" -type d 2>/dev/null | head -1)
-          fi
-          
-          if [ -z "$NDK_PATH" ] || [ ! -d "$NDK_PATH" ]; then
-            echo "❌ NDK не найден!"
-            exit 1
-          fi
+        # Находим NDK
+        NDK_PATH=""
+        if [ -d "/usr/local/lib/android/sdk/ndk/21.3.6528147" ]; then
+          NDK_PATH="/usr/local/lib/android/sdk/ndk/21.3.6528147"
+        else
+          # Ищем любую NDK
+          NDK_PATH=$(find /usr/local/lib/android/sdk -name "*ndk*" -type d 2>/dev/null | head -1)
+        fi
+        
+        if [ -z "$NDK_PATH" ]; then
+          echo "⚠️ NDK не найден, используем версию 23b"
+          $SDKMANAGER_CMD "ndk;23.1.7779620" --verbose
+          NDK_PATH="/usr/local/lib/android/sdk/ndk/23.1.7779620"
         fi
         
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
-        echo "✅ NDK найден: $NDK_PATH"
+        echo "✅ NDK: $NDK_PATH"
         
-        # Проверяем Build-tools
-        BUILD_TOOLS_DIR="/usr/local/lib/android/sdk/build-tools/31.0.0"
-        if [ ! -d "$BUILD_TOOLS_DIR" ]; then
-          BUILD_TOOLS_DIR=$(find /usr/local/lib/android/sdk -path "*/build-tools/*" -type d 2>/dev/null | head -1)
-        fi
+        # СОЗДАЕМ СИМВОЛИЧЕСКИЕ ССЫЛКИ ДЛЯ BUILDOZER
+        echo "Создаем символические ссылки для Buildozer..."
         
-        if [ ! -d "$BUILD_TOOLS_DIR" ]; then
-          echo "❌ Директория build-tools не найдена"
-          exit 1
-        fi
+        # Создаем структуру tools/bin, которую ожидает Buildozer
+        sudo mkdir -p /usr/local/lib/android/sdk/tools/bin
+        sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
         
-        echo "✅ Build-tools найдены: $BUILD_TOOLS_DIR"
-        
-        # Проверяем критические бинарные файлы
-        for bin in aapt zipalign; do
-          if [ ! -f "$BUILD_TOOLS_DIR/$bin" ]; then
-            echo "⚠️ $bin не найден в $BUILD_TOOLS_DIR/, но продолжаем"
-          else
-            echo "✅ $bin найден"
+        # Создаем другие необходимые ссылки
+        for tool in avdmanager profgen; do
+          if [ -f "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/$tool" ]; then
+            sudo ln -sf "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/$tool" "/usr/local/lib/android/sdk/tools/bin/$tool"
           fi
         done
         
-        echo "✅ Все Android компоненты проверены"
+        echo "✅ Символические ссылки созданы"
 
-    # 11. Подготовка main.py и buildozer.spec
+    # 10. ПОДГОТОВКА ФАЙЛОВ ПРИЛОЖЕНИЯ
     - name: Prepare application files
       run: |
         echo "=== Подготовка файлов приложения ==="
         
         # Создаем main.py
-        cat > main.py << 'MAIN_EOF'
+        cat > main.py << 'EOF'
         from kivy.app import App
         from kivy.uix.label import Label
 
         class TestApp(App):
             def build(self):
-                return Label(text="Hello from CI Build! Version 1.0")
+                return Label(text="Hello from CI Build!")
 
         if __name__ == '__main__':
             TestApp().run()
-        MAIN_EOF
-                echo "✅ main.py создан"
+        EOF
                 
-                # Создаем buildozer.spec
-                cat > buildozer.spec << 'SPEC_EOF'
+                # Создаем buildozer.spec с правильными путями
+                cat > buildozer.spec << 'EOF'
         [app]
         title = TestApp
         package.name = testapp
@@ -282,114 +200,106 @@ jobs:
         android.api = 31
         android.minapi = 21
         android.archs = armeabi-v7a
-
-        # Автоматическое определение путей
-        # Пути будут установлены динамически
+        android.sdk_path = /usr/local/lib/android/sdk
+        android.ndk_path = __NDK_PATH__
 
         [buildozer]
-        log_level = 1  # Уменьшаем verbosity для избежания проблем
+        log_level = 2
         warn_on_root = 1
         android.accept_sdk_license = True
 
         [android]
         [android:permissions]
         android.permission.INTERNET
-        SPEC_EOF
+        EOF
         
-        # Динамически обновляем пути
-        echo "Обновляем пути в buildozer.spec..."
+        # Заменяем плейсхолдер NDK пути
+        sed -i "s|__NDK_PATH__|$NDK_PATH|" buildozer.spec
         
-        # SDK путь
-        SDK_PATH="/usr/local/lib/android/sdk"
-        sed -i "s|^# android.sdk_path =.*|android.sdk_path = $SDK_PATH|" buildozer.spec
-        
-        # NDK путь
-        if [ -n "$NDK_PATH" ]; then
-          sed -i "s|^# android.ndk_path =.*|android.ndk_path = $NDK_PATH|" buildozer.spec
-        else
-          # Используем путь по умолчанию
-          DEFAULT_NDK="/usr/local/lib/android/sdk/ndk/21.3.6528147"
-          sed -i "s|^# android.ndk_path =.*|android.ndk_path = $DEFAULT_NDK|" buildozer.spec
-        fi
-        
-        echo "✅ buildozer.spec создан и настроен"
+        echo "✅ Файлы приложения подготовлены"
 
-    # 12. Настройка переменных окружения
+    # 11. НАСТРОЙКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
     - name: Setup environment variables
       run: |
         echo "=== Настройка переменных окружения ==="
         
-        # Основные переменные Android
         echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         
-        # Добавляем пути в PATH
+        # Добавляем пути в правильном порядке
         echo "/usr/local/lib/android/sdk/tools/bin" >> $GITHUB_PATH
         echo "/usr/local/lib/android/sdk/platform-tools" >> $GITHUB_PATH
+        echo "/usr/local/lib/android/sdk/build-tools/31.0.0" >> $GITHUB_PATH
         
-        echo "✅ Переменные окружения установлены"
+        echo "✅ Переменные окружения настроены"
 
-    # 13. Финальная проверка перед сборкой
-    - name: Final verification before build
+    # 12. ФИНАЛЬНАЯ ПРОВЕРКА
+    - name: Final verification
       run: |
         echo "=== Финальная проверка ==="
         
-        # Ключевые проверки
         echo "1. Проверка sdkmanager..."
-        if [ -f "/usr/local/lib/android/sdk/tools/bin/sdkmanager" ]; then
-          echo "✅ sdkmanager найден"
+        if /usr/local/lib/android/sdk/tools/bin/sdkmanager --list 2>&1 | head -5; then
+          echo "✅ sdkmanager работает"
         else
-          echo "❌ sdkmanager не найден!"
+          echo "❌ sdkmanager не работает"
+          # Пробуем напрямую
+          if /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list 2>&1 | head -5; then
+            echo "✅ Прямой sdkmanager работает"
+          else
+            echo "❌ Оба sdkmanager не работают"
+            exit 1
+          fi
+        fi
+        
+        echo "2. Проверка компонентов..."
+        if [ -d "/usr/local/lib/android/sdk/platform-tools" ]; then
+          echo "✅ platform-tools установлены"
+        else
+          echo "❌ platform-tools отсутствуют"
           exit 1
         fi
         
-        echo "2. Проверка лицензий..."
-        if [ -f ~/.android/repositories.cfg ]; then
-          echo "✅ Файл лицензий существует"
+        if [ -d "/usr/local/lib/android/sdk/build-tools/31.0.0" ]; then
+          echo "✅ build-tools установлены"
         else
-          echo "⚠️ Файл лицензий не найден, но продолжаем"
+          echo "❌ build-tools отсутствуют"
+          exit 1
         fi
         
-        echo "3. Проверка NDK..."
         if [ -d "$NDK_PATH" ]; then
-          echo "✅ NDK найден: $NDK_PATH"
+          echo "✅ NDK установлен: $NDK_PATH"
         else
-          echo "❌ NDK не найден!"
+          echo "❌ NDK отсутствует"
           exit 1
         fi
         
         echo "✅ Все проверки пройдены"
 
-    # 14. Сборка APK с уменьшенным verbosity
+    # 13. СБОРКА APK
     - name: Build APK
       run: |
-        echo "=== Начало сборки APK ==="
+        echo "=== Сборка APK ==="
         
-        # Устанавливаем переменные окружения
+        # Экспортируем переменные
         export ANDROID_SDK_ROOT="/usr/local/lib/android/sdk"
         export ANDROID_HOME="/usr/local/lib/android/sdk"
         
-        # Показываем информацию о среде
-        echo "Среда сборки:"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "NDK_PATH: $NDK_PATH"
-        echo "Java: $(java -version 2>&1 | head -1)"
+        echo "Начинаем сборку..."
+        echo "SDK путь: $ANDROID_SDK_ROOT"
+        echo "NDK путь: $NDK_PATH"
         
-        # Запускаем сборку с минимальным verbosity
-        echo "Запуск buildozer..."
+        # Запускаем сборку
         buildozer android debug
         
-        echo "✅ Сборка APK завершена"
+        echo "✅ Сборка завершена"
         
-        # Показываем результат
         if [ -d "bin" ]; then
-          echo "=== Созданные APK файлы ==="
-          ls -la bin/ 2>/dev/null || echo "Директория bin пуста"
-        else
-          echo "⚠️ Директория bin не создана"
+          echo "Созданные файлы:"
+          ls -la bin/*.apk 2>/dev/null || echo "APK не найдены, но директория создана"
         fi
 
-    # 15. Загрузка APK как артефакт
+    # 14. ЗАГРУЗКА APK
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
@@ -397,31 +307,30 @@ jobs:
         path: bin/*.apk
         if-no-files-found: warn
 
-    # 16. Отладка при ошибке
+    # 15. ОТЛАДКА ПРИ ОШИБКЕ
     - name: Debug on failure
       if: failure()
       run: |
-        echo "=== ИНФОРМАЦИЯ ДЛЯ ОТЛАДКИ ==="
+        echo "=== ОТЛАДКА ==="
+        
+        echo "1. Структура SDK:"
+        find /usr/local/lib/android/sdk -type f -name "*.jar" 2>/dev/null | head -10
         echo ""
-        echo "1. Проверка путей:"
-        echo "   /usr/local/lib/android/sdk существует: $([ -d "/usr/local/lib/android/sdk" ] && echo 'ДА' || echo 'НЕТ')"
-        echo "   sdkmanager существует: $([ -f "/usr/local/lib/android/sdk/tools/bin/sdkmanager" ] && echo 'ДА' || echo 'НЕТ')"
+        
+        echo "2. Проверка sdkmanager:"
+        echo "Символическая ссылка:"
+        ls -la /usr/local/lib/android/sdk/tools/bin/sdkmanager 2>/dev/null || echo "Не найдена"
         echo ""
-        echo "2. Содержимое SDK директорий:"
-        ls -la /usr/local/lib/android/sdk/ 2>/dev/null | head -10
+        
+        echo "3. Класс SdkManagerCli:"
+        find /usr/local/lib/android/sdk -name "*.jar" -exec sh -c 'jar tf {} 2>/dev/null | grep -q SdkManagerCli && echo "Найден в: {}"' \;
         echo ""
-        echo "3. Переменные окружения:"
-        echo "   ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "   ANDROID_HOME: $ANDROID_HOME"
-        echo "   NDK_PATH: $NDK_PATH"
+        
+        echo "4. Java классы:"
+        java -version
         echo ""
-        echo "4. Содержимое buildozer.spec:"
-        cat buildozer.spec 2>/dev/null | grep -E "^(android\.|requirements)" || echo "Не удалось прочитать buildozer.spec"
-        echo ""
-        echo "5. Проверка sdkmanager:"
-        /usr/local/lib/android/sdk/tools/bin/sdkmanager --list 2>&1 | head -5 || echo "sdkmanager не работает"
-        echo ""
-        echo "6. Поиск APK файлов:"
-        find . -name "*.apk" -type f 2>/dev/null || echo "APK файлы не найдены"
-        echo ""
-        echo "=== КОНЕЦ ИНФОРМАЦИИ ДЛЯ ОТЛАДКИ ==="
+        
+        echo "5. Лог последней команды:"
+        if [ -f ".buildozer/android/platform/build.log" ]; then
+          tail -50 .buildozer/android/platform/build.log
+        fi
