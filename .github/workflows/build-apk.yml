@@ -1,4 +1,4 @@
-name: Build Wave Defender APK
+name: Build with Docker
 
 on:
   push:
@@ -6,131 +6,35 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
+    - name: Build using Docker
       run: |
-        sudo apt update
-        sudo apt install -y python3-pip python3-dev git wget curl
-        pip3 install buildozer
-        
-    - name: Create minimal buildozer.spec
-      run: |
-        # Удаляем старый файл чтобы избежать конфликтов
-        rm -f buildozer.spec
-        
-        # Создаем минимальный конфиг
-        cat > buildozer.spec << 'EOF'
-        [app]
-        title = Wave Defender
-        package.name = wavedefender
-        package.domain = com.test
-        source.dir = .
-        requirements = python3
-        android.api = 30
-        android.minapi = 21
-        android.archs = armeabi-v7a
-
-        [buildozer]
-        warn_on_root = 0
-        log_level = 2
-        android.accept_sdk_license = True
-        EOF
-        
-        # Создаем простой main.py
-        echo 'print("App ready")' > main.py
-        
-        echo "✅ Конфиг создан"
-        cat buildozer.spec
+        # Используем Docker с предустановленным SDK
+        docker run --rm \
+          -v $(pwd):/src \
+          -w /src \
+          jgallagher/ubuntu-buildozer:latest \
+          bash -c "
+          apt update && apt install -y python3-pip &&
+          pip3 install buildozer &&
+          echo '[app]' > buildozer.spec &&
+          echo 'requirements = python3' >> buildozer.spec &&
+          echo 'android.api = 30' >> buildozer.spec &&
+          echo '' >> buildozer.spec &&
+          echo '[buildozer]' >> buildozer.spec &&
+          echo 'warn_on_root = 0' >> buildozer.spec &&
+          echo 'android.accept_sdk_license = True' >> buildozer.spec &&
+          echo 'print(\"OK\")' > main.py &&
+          buildozer android debug
+          "
     
-    - name: Setup Android SDK cache
-      run: |
-        # Создаем директории для кэша
-        mkdir -p ~/.buildozer/cache
-        mkdir -p ~/.android/cache
-        
-        # Устанавливаем переменные для кэша
-        export BUILD_DIR=$HOME/buildozer_cache
-        mkdir -p $BUILD_DIR
-        
-    - name: Build with retry and fixes
-      timeout-minutes: 60
-      run: |
-        # Увеличиваем swap
-        sudo fallocate -l 4G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        
-        echo "=== Начинаем сборку ==="
-        
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
-        
-        # Первая попытка сборки
-        echo "=== Попытка 1 ==="
-        buildozer -v android debug 2>&1 | tee build.log || true
-        
-        # Если ошибка сети, пробуем еще раз
-        if grep -q "read of closed file\|urllib\|ValueError" build.log; then
-          echo "⚠️  Ошибка сети, пробуем еще раз..."
-          echo "=== Попытка 2 ==="
-          sleep 10
-          rm -rf .buildozer/android/platform/build-armeabi-v7a 2>/dev/null || true
-          buildozer -v android debug 2>&1 | tee -a build.log || true
-        fi
-        
-        # Если все еще ошибка, пробуем скачать SDK вручную
-        if grep -q "read of closed file\|urllib\|ValueError" build.log; then
-          echo "⚠️  Пробуем альтернативный способ..."
-          echo "=== Скачиваем SDK вручную ==="
-          
-          # Создаем директорию для SDK
-          mkdir -p ~/.buildozer/android/platform
-          cd ~/.buildozer/android/platform
-          
-          # Скачиваем Android SDK командой tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
-          mv cmdline-tools tools
-          rm commandlinetools-linux-9477386_latest.zip
-          
-          # Возвращаемся в проект
-          cd -
-          
-          # Пробуем снова
-          echo "=== Попытка 3 ==="
-          buildozer -v android debug 2>&1 | tee -a build.log || true
-        fi
-        
-        # Убираем swap
-        sudo swapoff /swapfile
-        sudo rm /swapfile
-        
-        # Проверяем результат
-        echo "=== Проверка результата ==="
-        if ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "✅ УСПЕХ: APK создан!"
-          ls -lh bin/*.apk
-        else
-          echo "❌ APK не создан"
-          echo "Последние 50 строк лога:"
-          tail -50 build.log
-        fi
-    
-    - name: Upload APK
+    - name: Upload result
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-apk
+        name: docker-build
         path: bin/*.apk
         if-no-files-found: warn
-    
-    - name: Upload logs if failed
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: build.log
