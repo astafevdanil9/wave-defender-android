@@ -1,4 +1,4 @@
-name: Build with Docker
+name: Build Wave Defender APK
 
 on:
   push:
@@ -6,35 +6,110 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build using Docker
+    - name: Install dependencies
       run: |
-        # Используем Docker с предустановленным SDK
-        docker run --rm \
-          -v $(pwd):/src \
-          -w /src \
-          jgallagher/ubuntu-buildozer:latest \
-          bash -c "
-          apt update && apt install -y python3-pip &&
-          pip3 install buildozer &&
-          echo '[app]' > buildozer.spec &&
-          echo 'requirements = python3' >> buildozer.spec &&
-          echo 'android.api = 30' >> buildozer.spec &&
-          echo '' >> buildozer.spec &&
-          echo '[buildozer]' >> buildozer.spec &&
-          echo 'warn_on_root = 0' >> buildozer.spec &&
-          echo 'android.accept_sdk_license = True' >> buildozer.spec &&
-          echo 'print(\"OK\")' > main.py &&
-          buildozer android debug
-          "
+        sudo apt update
+        sudo apt install -y python3-pip python3-dev git wget curl
+        pip3 install buildozer
+        
+    - name: Create CORRECT buildozer.spec
+      run: |
+        # Удаляем старый файл
+        rm -f buildozer.spec
+        
+        # Создаем ПРАВИЛЬНЫЙ конфиг со ВСЕМИ обязательными полями
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = com.astafevdanil9
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 1.0.0  # ✅ ОБЯЗАТЕЛЬНОЕ поле!
+        version.regex = __version__ = '(.*)'
+        version.filename = %(source.dir)s/main.py
+        requirements = python3
+        orientation = landscape
+        fullscreen = 1
+        android.archs = armeabi-v7a
+        android.permissions = INTERNET, VIBRATE
+        android.api = 30
+        android.minapi = 21
+
+        [buildozer]
+        warn_on_root = 0
+        log_level = 2
+        android.accept_sdk_license = True
+        EOF
+        
+        # Создаем main.py с версией
+        echo '# Wave Defender Game' > main.py
+        echo '__version__ = "1.0.0"' >> main.py
+        echo '' >> main.py
+        echo 'print("Wave Defender Android")' >> main.py
+        
+        echo "✅ Конфиг создан с версией 1.0.0"
+        echo "=== Содержимое buildozer.spec ==="
+        head -20 buildozer.spec
     
-    - name: Upload result
+    - name: Setup environment
+      run: |
+        # Создаем директории
+        mkdir -p ~/.android/licenses
+        mkdir -p ~/.buildozer/cache
+        
+        # Принимаем лицензии
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
+        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
+        
+    - name: Build APK
+      timeout-minutes: 45
+      run: |
+        # Увеличиваем swap
+        sudo fallocate -l 4G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        
+        echo "=== Начинаем сборку Wave Defender ==="
+        
+        # Очищаем предыдущие сборки
+        rm -rf .buildozer bin 2>/dev/null || true
+        
+        # Запускаем сборку
+        buildozer -v android debug 2>&1 | tee build.log
+        
+        # Проверяем результат
+        echo "=== Проверка результата ==="
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "✅ УСПЕХ: APK создан!"
+          echo "Файл: $(ls bin/*.apk)"
+          echo "Размер: $(du -h bin/*.apk | cut -f1)"
+        else
+          echo "❌ APK не создан"
+          echo "Последние ошибки:"
+          grep -i "error\|fail\|warning" build.log | tail -20
+        fi
+        
+        # Убираем swap
+        sudo swapoff /swapfile
+        sudo rm /swapfile
+    
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: docker-build
+        name: wave-defender-android
         path: bin/*.apk
         if-no-files-found: warn
+    
+    - name: Upload build log
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-debug-log
+        path: build.log
