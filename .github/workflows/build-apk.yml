@@ -6,145 +6,64 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # ✅ МЕНЯЕМ на 22.04 (более стабильная)
+    runs-on: ubuntu-22.04
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup for PyGame
+    - name: Install all dependencies
       run: |
         sudo apt update
-        # Минимальный набор для pygame
-        sudo apt install -y \
-          python3-pip \
-          python3-dev \
-          git \
-          libsdl2-dev \
-          libsdl2-ttf-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
-          # ✅ ДОБАВЛЯЕМ для сборки Python
-          libssl-dev \
-          libffi-dev \
-          zlib1g-dev
+        sudo apt install -y python3-pip python3-dev git
+        sudo apt install -y libsdl2-dev libsdl2-ttf-dev
+        sudo apt install -y libssl-dev libffi-dev zlib1g-dev
         
-        # Устанавливаем pygame с source
-        pip3 install pygame==2.5.0 --no-binary pygame
+        pip3 install pygame buildozer cython
         
-        # Buildozer и зависимости (конкретные версии)
-        pip3 install buildozer==1.5.0 cython==0.29.33  # ✅ МЕНЯЕМ версии
-        
-    - name: Update buildozer.spec with FIXES
+    - name: Create buildozer.spec
       run: |
-        # Используем Python для правильного обновления конфига
-        python3 << 'EOF'
-        import configparser
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = com.astafevdanil9
+        source.dir = .
+        source.main = main.py
+        version = 1.0
+        requirements = python3,pygame
+        orientation = landscape
+        fullscreen = 1
+        android.archs = armeabi-v7a
+        android.permissions = INTERNET, VIBRATE
+        android.api = 30
+        android.minapi = 21
+        android.ndk = 21.4.7075529
 
-        config = configparser.ConfigParser()
-
-        # Читаем существующий файл
-        config.read('buildozer.spec')
-
-        # Обновляем настройки Android
-        if 'app' not in config:
-            config['app'] = {}
-            
-        config['app']['android.api'] = '30'  # ✅ МЕНЯЕМ на 30 (стабильнее)
-        config['app']['android.minapi'] = '21'
-        config['app']['android.ndk'] = '21.4.7075529'  # ✅ ДОБАВЛЯЕМ старую NDK
-        config['app']['android.archs'] = 'armeabi-v7a'  # ✅ МЕНЯЕМ на более простую архитектуру
-
-        # Добавляем секцию buildozer если её нет
-        if 'buildozer' not in config:
-            config['buildozer'] = {}
-
-        # КРИТИЧЕСКИ ВАЖНО: эта настройка должна быть в секции [buildozer]
-        config['buildozer']['android.accept_sdk_license'] = 'True'
-        config['buildozer']['warn_on_root'] = '0'
-        config['buildozer']['log_level'] = '2'
-
-        # ✅ ДОБАВЛЯЕМ настройки для python-for-android
-        config['p4a'] = {}
-        config['p4a']['branch'] = 'develop'
-
-        # Сохраняем
-        with open('buildozer.spec', 'w') as f:
-            config.write(f)
-
-        print("✅ buildozer.spec обновлен с фиксами для libffi")
+        [buildozer]
+        warn_on_root = 0
+        log_level = 2
+        android.accept_sdk_license = True
         EOF
-
-    - name: Pre-accept Android licenses
+    
+    - name: Accept licenses
       run: |
-        # ЗАРАНЕЕ принимаем лицензии Android SDK
         mkdir -p ~/.android/licenses
         echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
-        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
-        echo "84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.android/licenses/android-sdk-license
         
-    - name: Build with fixes
+    - name: Build
       run: |
-        # Создаем swap
-        sudo fallocate -l 4G /swapfile  # ✅ УВЕЛИЧИВАЕМ до 4G
+        sudo fallocate -l 2G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer bin 2>/dev/null || true
+        buildozer android debug
         
-        # Автоматически отвечаем "yes" на все вопросы
-        echo "=== Начинаем сборку с фиксами ==="
-        yes | buildozer -v android debug 2>&1 | tee build.log || true
-        
-        # Если первая попытка не удалась, пробуем без pygame
-        if [ ! -f bin/*.apk ]; then
-          echo "⚠️  Пробуем альтернативный подход..."
-          
-          # Создаем временный spec без pygame для теста
-          python3 << 'PY'
-          import configparser
-          config = configparser.ConfigParser()
-          config.read('buildozer.spec')
-          config['app']['requirements'] = 'python3,kivy'  # Заменяем pygame на kivy
-          with open('buildozer.spec', 'w') as f:
-              config.write(f)
-          PY
-                    
-                    rm -rf .buildozer/android/platform 2>/dev/null || true
-                    buildozer -v android debug 2>&1 | tee -a build.log
-                  fi
-        
-        # Очищаем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
-        
-        # Проверяем результат
-        echo "=== Результаты сборки ==="
-        if [ -f bin/*.apk ]; then
-          echo "✅ APK создан успешно!"
-          ls -lh bin/*.apk
-        else
-          echo "⚠️  APK не создан. Проверяем логи..."
-          echo "=== Последние ошибки ==="
-          grep -i "error\|fail\|libffi\|ffi" build.log | tail -20 || echo "Специфических ошибок не найдено"
-          echo "=== Последние 50 строк лога ==="
-          tail -50 build.log
-        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-apk
-        path: |
-          bin/*.apk
-          *.apk
-        if-no-files-found: warn
-    
-    - name: Upload build log on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-debug-log
-        path: build.log
-        retention-days: 7
+        name: apk-file
+        path: bin/*.apk
