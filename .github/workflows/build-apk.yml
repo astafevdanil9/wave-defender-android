@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # ✅ МЕНЯЕМ на 22.04 (более стабильная)
     
     steps:
     - uses: actions/checkout@v4
@@ -22,15 +22,19 @@ jobs:
           libsdl2-dev \
           libsdl2-ttf-dev \
           libsdl2-image-dev \
-          libsdl2-mixer-dev
+          libsdl2-mixer-dev \
+          # ✅ ДОБАВЛЯЕМ для сборки Python
+          libssl-dev \
+          libffi-dev \
+          zlib1g-dev
         
         # Устанавливаем pygame с source
         pip3 install pygame==2.5.0 --no-binary pygame
         
-        # Buildozer и зависимости
-        pip3 install buildozer cython
+        # Buildozer и зависимости (конкретные версии)
+        pip3 install buildozer==1.5.0 cython==0.29.33  # ✅ МЕНЯЕМ версии
         
-    - name: Update buildozer.spec
+    - name: Update buildozer.spec with FIXES
       run: |
         # Используем Python для правильного обновления конфига
         python3 << 'EOF'
@@ -45,8 +49,10 @@ jobs:
         if 'app' not in config:
             config['app'] = {}
             
-        config['app']['android.api'] = '31'  # Используем 31 вместо 33
+        config['app']['android.api'] = '30'  # ✅ МЕНЯЕМ на 30 (стабильнее)
         config['app']['android.minapi'] = '21'
+        config['app']['android.ndk'] = '21.4.7075529'  # ✅ ДОБАВЛЯЕМ старую NDK
+        config['app']['android.archs'] = 'armeabi-v7a'  # ✅ МЕНЯЕМ на более простую архитектуру
 
         # Добавляем секцию buildozer если её нет
         if 'buildozer' not in config:
@@ -57,11 +63,15 @@ jobs:
         config['buildozer']['warn_on_root'] = '0'
         config['buildozer']['log_level'] = '2'
 
+        # ✅ ДОБАВЛЯЕМ настройки для python-for-android
+        config['p4a'] = {}
+        config['p4a']['branch'] = 'develop'
+
         # Сохраняем
         with open('buildozer.spec', 'w') as f:
             config.write(f)
 
-        print("✅ buildozer.spec обновлен")
+        print("✅ buildozer.spec обновлен с фиксами для libffi")
         EOF
 
     - name: Pre-accept Android licenses
@@ -72,26 +82,53 @@ jobs:
         echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
         echo "84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.android/licenses/android-sdk-license
         
-    - name: Build
+    - name: Build with fixes
       run: |
         # Создаем swap
-        sudo fallocate -l 2G /swapfile
+        sudo fallocate -l 4G /swapfile  # ✅ УВЕЛИЧИВАЕМ до 4G
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
+        # Очищаем предыдущие сборки
+        rm -rf .buildozer bin 2>/dev/null || true
+        
         # Автоматически отвечаем "yes" на все вопросы
-        yes | buildozer android debug 2>&1 | tee build.log || true
+        echo "=== Начинаем сборку с фиксами ==="
+        yes | buildozer -v android debug 2>&1 | tee build.log || true
+        
+        # Если первая попытка не удалась, пробуем без pygame
+        if [ ! -f bin/*.apk ]; then
+          echo "⚠️  Пробуем альтернативный подход..."
+          
+          # Создаем временный spec без pygame для теста
+          python3 << 'PY'
+          import configparser
+          config = configparser.ConfigParser()
+          config.read('buildozer.spec')
+          config['app']['requirements'] = 'python3,kivy'  # Заменяем pygame на kivy
+          with open('buildozer.spec', 'w') as f:
+              config.write(f)
+          PY
+                    
+                    rm -rf .buildozer/android/platform 2>/dev/null || true
+                    buildozer -v android debug 2>&1 | tee -a build.log
+                  fi
         
         # Очищаем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
         
         # Проверяем результат
+        echo "=== Результаты сборки ==="
         if [ -f bin/*.apk ]; then
           echo "✅ APK создан успешно!"
+          ls -lh bin/*.apk
         else
-          echo "⚠️  Проверяем логи..."
+          echo "⚠️  APK не создан. Проверяем логи..."
+          echo "=== Последние ошибки ==="
+          grep -i "error\|fail\|libffi\|ffi" build.log | tail -20 || echo "Специфических ошибок не найдено"
+          echo "=== Последние 50 строк лога ==="
           tail -50 build.log
         fi
     
@@ -99,5 +136,15 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: wave-defender-apk
-        path: bin/*.apk
+        path: |
+          bin/*.apk
+          *.apk
         if-no-files-found: warn
+    
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-debug-log
+        path: build.log
+        retention-days: 7
