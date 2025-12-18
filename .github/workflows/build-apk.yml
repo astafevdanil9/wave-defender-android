@@ -50,19 +50,7 @@ jobs:
           "platforms;android-30" \
           "build-tools;30.0.3" \
           "platform-tools"
-
-    - name: Download python-for-android
-      run: |
-        # Скачиваем python-for-android вручную если нужно
-        mkdir -p .buildozer/android/platform
-        cd .buildozer/android/platform
-        if [ ! -d "python-for-android" ]; then
-          git clone https://github.com/kivy/python-for-android.git
-          cd python-for-android
-          # Используем последний стабильный тег
-          git checkout $(git describe --tags $(git rev-list --tags --max-count=1)) || git checkout master
-        fi
-
+            
     - name: Configure Buildozer
       run: |
         cat > buildozer.spec << 'EOF'
