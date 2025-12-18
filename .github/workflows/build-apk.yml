@@ -1,187 +1,38 @@
-name: Build Android APK
+name: Build APK
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # Используем самую свежую версию Ubuntu
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Установка необходимых пакетов
+    - uses: actions/checkout@v4
+    
+    - name: Install Buildozer
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          python3-pip \
-          python3-venv \
-          git \
-          zip \
-          unzip \
-          build-essential \
-          libssl-dev \
-          libffi-dev \
-          libncurses5-dev \
-          libsqlite3-dev \
-          libreadline-dev \
-          libbz2-dev \
-          libgdbm-dev \
-          zlib1g-dev \
-          libffi-dev \
-          wget \
-          curl \
-          unzip
-          
-    - name: Установка Java 11 (обязательно для Android)
-      run: |
-        sudo apt-get install -y openjdk-11-jdk
-        echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
-        echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
-        
-    - name: Установка Android SDK
-      run: |
-        # Создаем директорию
-        mkdir -p $HOME/android-sdk
-        
-        # Скачиваем командные инструменты
-        cd $HOME/android-sdk
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
-        
-        # Создаем правильную структуру
-        mkdir -p cmdline-tools
-        mv tools cmdline-tools/latest
-        
-        # Настраиваем переменные
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
-        
-    - name: Установка Android SDK компонентов
-      run: |
-        # Принимаем лицензии автоматически
-        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-        
-        # Устанавливаем необходимые компоненты
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager \
-          --sdk_root=$HOME/android-sdk \
-          "platform-tools" \
-          "platforms;android-31" \
-          "build-tools;30.0.3" \
-          "ndk;21.4.7075529"
-          
-        # Проверяем установку
-        echo "Проверка установленных компонентов:"
-        ls -la $HOME/android-sdk/platform-tools/
-        ls -la $HOME/android-sdk/build-tools/
-        
-    - name: Установка Buildozer и зависимостей
-      run: |
-        # Устанавливаем Buildozer
-        pip3 install --upgrade pip
+        sudo apt update
+        sudo apt install -y python3-pip git zip unzip openjdk-11-jdk
         pip3 install buildozer
-        pip3 install cython==0.29.33  # Более старая стабильная версия
-        pip3 install virtualenv
         
-        # Проверяем установку
-        echo "Buildozer установлен:"
-        buildozer --version 2>/dev/null || echo "Buildozer проверка..."
-        
-    - name: Настройка Buildozer
+    - name: Initialize Buildozer
       run: |
-        # Создаем buildozer.spec если его нет
         if [ ! -f "buildozer.spec" ]; then
-          echo "Создаю минимальный buildozer.spec..."
-          cat > buildozer.spec << 'EOF'
-[app]
-title = MyApp
-package.name = myapp
-package.domain = org.test
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf
-version = 0.1
-requirements = python3,kivy==2.1.0
-orientation = portrait
-osx.python_version = 3
-osx.kivy_version = 2.1.0
-fullscreen = 0
-android.api = 31
-android.minapi = 21
-android.ndk = 21.4.7075529
-android.sdk = 31
-android.arch = armeabi-v7a
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
-android.accept_sdk_license = True
-
-# Разрешения Android
-android.permissions = INTERNET
-
-# Метаданные
-android.meta_data = android.allow_backup=true
-EOF
+          buildozer init
+          echo "requirements = python3" >> buildozer.spec
         fi
         
-        # Обновляем пути в buildozer.spec
-        sed -i "s|^android.sdk_path =.*|android.sdk_path = $HOME/android-sdk|" buildozer.spec 2>/dev/null || true
-        sed -i "s|^android.ndk_path =.*|android.ndk_path = $HOME/android-sdk/ndk/21.4.7075529|" buildozer.spec 2>/dev/null || true
-        
-        # Создаем тестовое приложение если нет исходников
-        if [ ! -f "main.py" ] && [ ! -f "*.py" ]; then
-          echo "Создаю тестовое приложение..."
-          cat > main.py << 'EOF'
-import kivy
-kivy.require('2.1.0')
-
-from kivy.app import App
-from kivy.uix.label import Label
-
-class TestApp(App):
-    def build(self):
-        return Label(text='Hello from GitHub Actions!')
-
-if __name__ == '__main__':
-    TestApp().run()
-EOF
-        fi
-        
-    - name: Сборка APK
+    - name: Accept Android licenses
       run: |
-        # Экспортируем переменные окружения
-        export ANDROID_SDK_ROOT=$HOME/android-sdk
-        export ANDROID_HOME=$HOME/android-sdk
-        export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-        export PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/30.0.3:$PATH
+        mkdir -p ~/.android
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/repositories.cfg
+        yes | buildozer android debug 2>&1 | tail -50 || true
         
-        # Очищаем предыдущие сборки
-        rm -rf .buildozer 2>/dev/null || true
-        
-        # Запускаем сборку с подробным выводом
-        echo "Начинаю сборку APK..."
+    - name: Build APK
+      run: |
         buildozer -v android debug
         
-    - name: Загрузка артефакта
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: android-apk
+        name: apk-file
         path: bin/*.apk
-        retention-days: 7
-        
-    - name: Показать информацию о сборке
-      if: always()
-      run: |
-        echo "=== Итог сборки ==="
-        echo "Рабочая директория: $(pwd)"
-        echo "Содержимое bin/:"
-        ls -la bin/ 2>/dev/null || echo "Папка bin не существует"
-        echo ""
-        echo "Свободное место:"
-        df -h
