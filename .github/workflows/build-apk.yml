@@ -51,49 +51,56 @@ jobs:
         pip install "virtualenv>=20.0.0"
         pip install "sh>=1.14.0"
 
-    # 6. Install Android SDK and NDK
+    # 6. Install Android SDK and NDK (safe version)
     - name: Install Android SDK and NDK
       run: |
         export ANDROID_SDK_ROOT="$HOME/android-sdk"
         export ANDROID_HOME="$ANDROID_SDK_ROOT"
-        
-        # Создаем директорию
+
+        # Создаем директории
         mkdir -p $ANDROID_SDK_ROOT
         cd $ANDROID_SDK_ROOT
-        
+
         # Скачиваем Command Line Tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
-        rm commandlinetools-linux-9477386_latest.zip
-        
-        # Перемещаем в правильную структуру
-        mkdir -p cmdline-tools
-        mv cmdline-tools cmdline-tools/latest
-        
-        # Добавляем в PATH
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip -d temp
+        rm cmdline-tools.zip
+
+        # Переносим содержимое в правильную структуру
+        mkdir -p cmdline-tools/latest
+        mv temp/cmdline-tools/* cmdline-tools/latest/
+        rm -rf temp
+
+        # Добавляем sdkmanager и platform-tools в PATH
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-        
+
         # Принимаем лицензии
         yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
-        
-        # Устанавливаем компоненты
+
+        # Устанавливаем платформы, build-tools и NDK
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
           "platform-tools" \
           "platforms;android-31" \
           "build-tools;31.0.0" \
-          "ndk;23.1.7779620"
-        
+          "ndk;25.1.8937393"
+
         # Находим путь к NDK
-        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*23.1*" | head -1)
+        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d -name "*25.1*" | head -1)
         if [ -z "$NDK_PATH" ]; then
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | head -1)
         fi
-        
+
+        # Сохраняем переменные среды
         echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
+        # Создаем символическую ссылку для старых версий Buildozer
+        mkdir -p $ANDROID_SDK_ROOT/tools
+        ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin $ANDROID_SDK_ROOT/tools/bin
+
+        echo "✅ Android SDK и NDK установлены"
     # 7. Increase swap space for compilation
     - name: Increase swap space
       run: |
