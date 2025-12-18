@@ -3,7 +3,6 @@ name: Build Android APK
 on:
   push:
     branches: [ main, master ]
-  pull_request:
 
 jobs:
   build:
@@ -13,13 +12,7 @@ jobs:
       # 1. Забираем код
       - uses: actions/checkout@v4
 
-      # 2. Настраиваем Python
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      # 3. Подготовка main.py
+      # 2. Подготовка main.py
       - name: Create main.py
         run: |
           cat > main.py << 'EOF'
@@ -33,9 +26,8 @@ jobs:
           if __name__ == '__main__':
               TestApp().run()
           EOF
-          echo "✅ main.py создан"
 
-      # 4. Подготовка buildozer.spec
+      # 3. Подготовка buildozer.spec
       - name: Create buildozer.spec
         run: |
           cat > buildozer.spec << 'EOF'
@@ -48,7 +40,7 @@ jobs:
           version = 1.0
           requirements = python3,kivy
           orientation = portrait
-          android.api = 30
+          android.api = 33
           android.minapi = 21
           android.archs = armeabi-v7a
 
@@ -56,36 +48,22 @@ jobs:
           log_level = 2
           android.accept_sdk_license = True
           EOF
-          echo "✅ buildozer.spec создан"
 
-      # 5. Сборка APK через Buildozer Action (Docker)
-      - name: Build APK with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      # 4. Сборка APK через Docker Buildozer
+      - name: Build APK (Docker)
+        uses: docker://pybee/buildozer:latest
         with:
-          workdir: .
-          buildozer_version: stable
+          options: >
+            --rm
+            -v ${{ github.workspace }}:/app
+        run: |
+          cd /app
+          buildozer android debug
 
-      # 6. Загрузка APK как артефакт
+      # 5. Загрузка APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
           if-no-files-found: warn
-
-      # 7. Отладка при ошибке сборки
-      - name: Debug on failure
-        if: failure()
-        run: |
-          echo "=== ОТЛАДКА ==="
-          echo "1. Содержимое текущей директории:"
-          ls -la
-          echo ""
-          echo "2. Buildozer лог:"
-          tail -n 100 .buildozer/android/platform/build.log || echo "Лог не найден"
-          echo ""
-          echo "3. Python версия:"
-          python --version
-          echo "4. Kivy версия:"
-          python -c "import kivy; print(kivy.__version__)"
