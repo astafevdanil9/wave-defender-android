@@ -31,6 +31,7 @@ jobs:
             python3-pip \
             python3-setuptools \
             python3-wheel \
+            python3-dev \
             git \
             zip \
             unzip \
@@ -39,7 +40,27 @@ jobs:
             build-essential \
             zlib1g-dev \
             libgl1-mesa-dev \
-            libgles2-mesa-dev
+            libgles2-mesa-dev \
+            libgstreamer1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            pkg-config \
+            libmtdev-dev \
+            xclip \
+            xsel \
+            libjpeg-dev \
+            libsdl2-dev \
+            libsdl2-image-dev \
+            libsdl2-mixer-dev \
+            libsdl2-ttf-dev \
+            libportmidi-dev \
+            libswscale-dev \
+            libavformat-dev \
+            libavcodec-dev
+
 
       # 5. Установка Python-пакетов и Buildozer в виртуальном окружении
       - name: Install Buildozer and Python dependencies
