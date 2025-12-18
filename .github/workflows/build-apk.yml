@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # ✅ МЕНЯЕМ на 22.04 (более стабильная)
+    runs-on: ubuntu-22.04
     
     steps:
     - uses: actions/checkout@v4
@@ -23,7 +23,6 @@ jobs:
           libsdl2-ttf-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
-          # ✅ ДОБАВЛЯЕМ для сборки Python
           libssl-dev \
           libffi-dev \
           zlib1g-dev
@@ -32,7 +31,7 @@ jobs:
         pip3 install pygame==2.5.0 --no-binary pygame
         
         # Buildozer и зависимости (конкретные версии)
-        pip3 install buildozer==1.5.0 cython==0.29.33  # ✅ МЕНЯЕМ версии
+        pip3 install buildozer==1.5.0 cython==0.29.33
         
     - name: Update buildozer.spec with FIXES
       run: |
@@ -49,10 +48,10 @@ jobs:
         if 'app' not in config:
             config['app'] = {}
             
-        config['app']['android.api'] = '30'  # ✅ МЕНЯЕМ на 30 (стабильнее)
+        config['app']['android.api'] = '30'
         config['app']['android.minapi'] = '21'
-        config['app']['android.ndk'] = '21.4.7075529'  # ✅ ДОБАВЛЯЕМ старую NDK
-        config['app']['android.archs'] = 'armeabi-v7a'  # ✅ МЕНЯЕМ на более простую архитектуру
+        config['app']['android.ndk'] = '21.4.7075529'
+        config['app']['android.archs'] = 'armeabi-v7a'
 
         # Добавляем секцию buildozer если её нет
         if 'buildozer' not in config:
@@ -63,7 +62,7 @@ jobs:
         config['buildozer']['warn_on_root'] = '0'
         config['buildozer']['log_level'] = '2'
 
-        # ✅ ДОБАВЛЯЕМ настройки для python-for-android
+        # Добавляем настройки для python-for-android
         config['p4a'] = {}
         config['p4a']['branch'] = 'develop'
 
@@ -85,7 +84,7 @@ jobs:
     - name: Build with fixes
       run: |
         # Создаем swap
-        sudo fallocate -l 4G /swapfile  # ✅ УВЕЛИЧИВАЕМ до 4G
+        sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
@@ -96,7 +95,24 @@ jobs:
         # Автоматически отвечаем "yes" на все вопросы
         echo "=== Начинаем сборку с фиксами ==="
         yes | buildozer -v android debug 2>&1 | tee build.log || true
-        echo "=== Сборка завершена ==="
+        
+        # Если первая попытка не удалась, пробуем без pygame
+        if [ ! -f bin/*.apk ]; then
+          echo "⚠️  Пробуем альтернативный подход..."
+          
+          # Создаем временный spec без pygame для теста
+          python3 << 'PY'
+          import configparser
+          config = configparser.ConfigParser()
+          config.read('buildozer.spec')
+          config['app']['requirements'] = 'python3,kivy'  # Заменяем pygame на kivy
+          with open('buildozer.spec', 'w') as f:
+              config.write(f)
+          PY
+                    
+                    rm -rf .buildozer/android/platform 2>/dev/null || true
+                    buildozer -v android debug 2>&1 | tee -a build.log
+                  fi
         
         # Очищаем swap
         sudo swapoff /swapfile
