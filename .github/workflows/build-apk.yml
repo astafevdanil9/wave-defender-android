@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
@@ -12,11 +12,11 @@ jobs:
     # 1. Забираем код
     - uses: actions/checkout@v4
 
-    # 2. Установка Python 3.11
-    - name: Setup Python 3.11
+    # 2. Установка Python 3.9 (совместимая с Kivy)
+    - name: Setup Python 3.9
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: '3.9'
 
     # 3. Установка Java 17
     - name: Setup Java 17
@@ -42,13 +42,15 @@ jobs:
           libportmidi-dev \
           libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
           gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
-          pkg-config libjpeg-dev libmtdev-dev xclip xsel
+          pkg-config libjpeg-dev libmtdev-dev xclip xsel \
+          libpango1.0-dev libharfbuzz-dev  # Добавлены для решения проблемы с pangoft2
 
     # 6. Установка Buildozer и зависимостей Python
     - name: Install Buildozer and Python packages
       run: |
-        pip install --upgrade pip
-        pip install buildozer cython==0.29.33 virtualenv kivy==2.0.0
+        pip install --upgrade pip setuptools virtualenv
+        pip install buildozer "cython<3.0"
+        pip install "kivy[base]" kivy_examples --pre --extra-index-url https://kivy.org/downloads/simple/
 
     # 7. Установка NDK, Build-tools и платформ Android
     - name: Install Android SDK components
@@ -93,7 +95,7 @@ jobs:
         echo "if __name__ == '__main__':" >> main.py
         echo "    TestApp().run()" >> main.py
 
-        # Создаем buildozer.spec
+        # Создаем buildozer.spec с актуальной версией Kivy
         echo "[app]" > buildozer.spec
         echo "title = TestApp" >> buildozer.spec
         echo "package.name = testapp" >> buildozer.spec
@@ -101,7 +103,7 @@ jobs:
         echo "source.dir = ." >> buildozer.spec
         echo "source.include_exts = py,png,jpg,kv,atlas" >> buildozer.spec
         echo "version = 1.0" >> buildozer.spec
-        echo "requirements = python3,kivy==2.0.0" >> buildozer.spec
+        echo "requirements = python3,kivy" >> buildozer.spec  # Используем последнюю версию из pip
         echo "orientation = portrait" >> buildozer.spec
         echo "android.api = 31" >> buildozer.spec
         echo "android.minapi = 21" >> buildozer.spec
@@ -144,6 +146,11 @@ jobs:
     # 12. Сборка APK
     - name: Build APK
       run: |
+        echo "=== Starting APK build ==="
+        echo "Python version:"
+        python --version
+        echo "Kivy version:"
+        python -c "import kivy; print('Kivy:', kivy.__version__)"
         buildozer -v android debug
 
     # 13. Загрузка APK как артефакт
@@ -159,11 +166,17 @@ jobs:
       if: failure()
       run: |
         echo "=== Debug info ==="
-        ls -la
-        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+        echo "Python info:"
+        python --version
+        python -m pip list | grep -E "kivy|cython|buildozer"
+        echo ""
+        echo "Android SDK info:"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "NDK_PATH: $NDK_PATH"
-        echo "JAVA_HOME: $JAVA_HOME"
+        echo ""
+        echo "File search:"
+        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
         if [ -f ".buildozer/android/platform/build.log" ]; then
-          tail -100 .buildozer/android/platform/build.log
+          echo "Last 50 lines of build log:"
+          tail -50 .buildozer/android/platform/build.log
         fi
