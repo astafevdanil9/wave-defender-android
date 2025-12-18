@@ -1,4 +1,4 @@
-name: Let Buildozer Download Everything
+name: Build Android APK
 
 on:
   push:
@@ -11,77 +11,128 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup
+    - name: Setup environment
       run: |
         sudo apt update
-        sudo apt install -y python3-pip git zip unzip openjdk-11-jdk
-        pip3 install buildozer==1.4.0 cython==0.29.33 pygame==2.1.2 
-    
-    - name: Setup Android SDK environment
+        sudo apt install -y \
+          python3 \
+          python3-pip \
+          python3-venv \
+          git \
+          zip \
+          unzip \
+          openjdk-11-jdk \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libtinfo5 \
+          cmake \
+          libffi-dev \
+          libssl-dev
+          
+        pip3 install --upgrade pip wheel setuptools
+        pip3 install buildozer==1.4.0 cython==0.29.33 pygame==2.1.2
+        
+    - name: Accept Android SDK licenses
       run: |
         # Принимаем лицензии Android SDK
         yes | sudo /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
         
-        # Устанавливаем необходимые компоненты
-        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;30.0.3" "platform-tools"
-    
-    - name: Create buildozer.spec with correct paths
+        # Устанавливаем необходимые платформы и инструменты
+        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager \
+          "platforms;android-30" \
+          "build-tools;30.0.3" \
+          "platform-tools" \
+          "tools"
+        
+    - name: Initialize Buildozer project
       run: |
-        cat > buildozer.spec << 'EOF'
+        # Инициализируем buildozer если spec файла нет
+        if [ ! -f buildozer.spec ]; then
+          buildozer init
+        fi
+        
+        # Обновляем существующий spec файл
+          cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
         package.domain = org.test
         source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
         version = 1.0
-        requirements = python3, pygame
+        requirements = python3, pygame==2.1.2, kivy
         android.api = 30
         android.minapi = 21
+        android.sdk = 30
+        android.ndk = 25.1.8937393
         android.archs = armeabi-v7a
+        android.accept_sdk_license = True
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
-        android.accept_sdk_license = True
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
-    
-    - name: Build APK
+        
+    - name: Download python-for-android
       run: |
-        # Устанавливаем правильные пути
-        export ANDROID_HOME=/usr/local/lib/android/sdk
-        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-        export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
-        export ANDROID_NDK_ROOT=/usr/local/lib/android/sdk/ndk/27.3.13750724
+        # Скачиваем python-for-android вручную если нужно
+        mkdir -p .buildozer/android/platform
+        cd .buildozer/android/platform
+        if [ ! -d "python-for-android" ]; then
+          git clone https://github.com/kivy/python-for-android.git
+          cd python-for-android
+          git checkout 2023.08.04  # Стабильная версия
+        fi
+        
+    - name: Build APK
+      env:
+        ANDROID_HOME: /usr/local/lib/android/sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
+      run: |
+        # Устанавливаем правильные пути в PATH
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
         
-        # Принудительно обновляем buildozer
-        buildozer android clean
+        # Сначала инициализируем buildozer
+        echo "=== Step 1: Initialize buildozer ==="
+        buildozer android update 2>&1 | tail -50 || true
         
-        # Пробуем разные варианты сборки
-        echo "Вариант 1: Стандартная сборка"
-        buildozer android debug 2>&1 | tail -100 || true
+        # Очищаем предыдущие сборки
+        echo "=== Step 2: Clean old builds ==="
+        rm -rf .buildozer/android/build
+        rm -rf .buildozer/android/platform/build
         
-        # Если не сработало, пробуем с опцией --verbose
-        echo "Вариант 2: Сборка с --verbose"
-        buildozer android debug --verbose 2>&1 | tail -150 || true
-    
+        # Собираем APK
+        echo "=== Step 3: Build APK ==="
+        buildozer android debug 2>&1 | tail -200
+        
     - name: Check for APK
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           echo "✅ APK найден!"
           ls -la bin/*.apk
+          echo "Размер APK: $(du -h bin/*.apk | cut -f1)"
         else
           echo "❌ APK не найден"
-          echo "Проверяем структуру каталогов:"
-          ls -la
-          if [ -d .buildozer ]; then
-            echo "Содержимое .buildozer:"
-            find .buildozer -type f -name "*.log" | head -5 | xargs tail -50
+          echo "=== Проверяем логи ==="
+          if [ -f .buildozer/android/platform/build-armeabi-v7a/build.json ]; then
+            echo "Последние строки из build.json:"
+            tail -20 .buildozer/android/platform/build-armeabi-v7a/build.json
+          fi
+          if ls .buildozer/*.log 1> /dev/null 2>&1; then
+            echo "Последние ошибки из логов:"
+            tail -100 .buildozer/*.log
           fi
         fi
-    
+        
     - uses: actions/upload-artifact@v4
       if: success()
       with:
