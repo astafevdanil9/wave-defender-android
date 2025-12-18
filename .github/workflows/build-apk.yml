@@ -11,23 +11,43 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build with alternative Docker image
+    - name: Prepare files locally
       run: |
-        # Используем другой образ
+        # Создаем все файлы локально
+        echo 'print("Hello Android")' > main.py
+        
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = MyApp
+        package.name = myapp
+        package.domain = org.test
+        source.dir = .
+        version = 1.0
+        requirements = python3
+        android.api = 30
+        android.minapi = 21
+        android.archs = armeabi-v7a
+
+        [buildozer]
+        log_level = 2
+        warn_on_root = 0
+        EOF
+
+    - name: Build with Docker (fixed)
+      run: |
         docker run --rm \
           -v $(pwd):/src \
           -w /src \
           python:3.9-slim \
           bash -c "
-          apt update && apt install -y python3-pip git zip unzip &&
-          pip install buildozer &&
-          echo '[buildozer]
-          warn_on_root = 0
-          log_level = 2' > ~/.buildozer/config &&
-          echo 'print(\"Hello\")' > main.py &&
-          echo '[app]
-          requirements = python3
-          android.api = 30' > buildozer.spec &&
+          # Устанавливаем зависимости
+          apt-get update && apt-get install -y python3-pip 2>/dev/null
+          
+          # Устанавливаем buildozer
+          pip3 install buildozer 2>/dev/null
+          
+          # Запускаем сборку
+          cd /src
           buildozer android debug
           "
 
@@ -36,3 +56,4 @@ jobs:
       with:
         name: apk-result
         path: bin/*.apk
+        if-no-files-found: warn
