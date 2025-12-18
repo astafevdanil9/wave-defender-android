@@ -1,4 +1,4 @@
-name: Simple Android Build
+name: Build Android APK with Docker
 
 on:
   push:
@@ -6,87 +6,33 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup environment
+    - name: Build with alternative Docker image
       run: |
-        sudo apt update
-        sudo apt install -y \
-          python3-pip \
-          python3-dev \
-          build-essential \
-          git \
-          zip \
-          unzip
-
-    - name: Install and configure Buildozer
-      run: |
-        # Устанавливаем buildozer
-        pip3 install buildozer
-        
-        # Создаем простой main.py
-        echo 'print("Hello Android!")' > main.py
-        
-        # Инициализируем buildozer (автоматически отвечаем на вопросы)
-        echo -e "y\ny" | buildozer init
-        
-        # Обновляем конфигурацию
-        python3 << 'PYTHON'
-        import configparser
-        import os
-
-        config = configparser.ConfigParser()
-
-        # Создаем новый конфиг
-        config['app'] = {
-            'title': 'MyApp',
-            'package.name': 'myapp',
-            'package.domain': 'org.test',
-            'source.dir': '.',
-            'version': '1.0',
-            'requirements': 'python3',
-            'android.api': '30',
-            'android.minapi': '21',
-            'android.archs': 'armeabi-v7a'
-        }
-
-        config['buildozer'] = {
-            'log_level': '2',
-            'warn_on_root': '0',
-            'build_dir': './.buildozer',
-            'bin_dir': './bin'
-        }
-
-        # Создаем директории
-        os.makedirs('.buildozer', exist_ok=True)
-        os.makedirs('bin', exist_ok=True)
-
-        # Сохраняем конфиг
-        with open('buildozer.spec', 'w') as f:
-            config.write(f)
-        PYTHON
-
-    - name: Build APK
-      timeout-minutes: 30
-      run: |
-        # Создаем swap для компиляции
-        sudo fallocate -l 2G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        
-        # Собираем APK
-        buildozer android debug
-        
-        # Очищаем swap
-        sudo swapoff /swapfile
-        sudo rm /swapfile
+        # Используем другой образ
+        docker run --rm \
+          -v $(pwd):/src \
+          -w /src \
+          python:3.9-slim \
+          bash -c "
+          apt update && apt install -y python3-pip git zip unzip &&
+          pip install buildozer &&
+          echo '[buildozer]
+          warn_on_root = 0
+          log_level = 2' > ~/.buildozer/config &&
+          echo 'print(\"Hello\")' > main.py &&
+          echo '[app]
+          requirements = python3
+          android.api = 30' > buildozer.spec &&
+          buildozer android debug
+          "
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: app-release
+        name: apk-result
         path: bin/*.apk
