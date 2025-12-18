@@ -18,32 +18,69 @@ jobs:
       with:
         python-version: '3.9'
         
-    - name: Install all dependencies in one step
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        
-        # Установка ВСЕХ зависимостей одной командой
         sudo apt-get install -y \
-          python3-pip python3-venv python3-dev \
-          build-essential git zip unzip curl wget \
-          openjdk-17-jdk openjdk-17-jre \
-          autoconf libtool pkg-config automake \
-          zlib1g-dev libffi-dev libssl-dev libncurses5-dev \
-          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libxml2-dev libxslt1-dev cmake ninja-build ccache \
-          android-sdk android-sdk-platform-31 android-sdk-build-tools \
-          aidl aapt zipalign
+          python3-pip \
+          python3-venv \
+          build-essential \
+          git \
+          zip \
+          unzip \
+          curl \
+          wget \
+          openjdk-17-jdk \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libffi-dev \
+          libssl-dev \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev
         
-        # Установка pip пакетов
+    - name: Install Android SDK and NDK
+      run: |
+        # Создаем директорию для Android SDK
+        mkdir -p /home/runner/android-sdk
+        
+        # Скачиваем Command Line Tools
+        cd /home/runner/android-sdk
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/
+        rm -rf cmdline-tools-linux-9477386_latest.zip
+        
+        # Настройка переменных окружения
+        echo "ANDROID_SDK_ROOT=/home/runner/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=/home/runner/android-sdk" >> $GITHUB_ENV
+        echo "PATH=/home/runner/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+        
+        # Принимаем лицензии
+        yes | /home/runner/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=/home/runner/android-sdk
+        
+        # Устанавливаем необходимые компоненты
+        /home/runner/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+          --sdk_root=/home/runner/android-sdk \
+          "platform-tools" \
+          "platforms;android-31" \
+          "build-tools;31.0.0" \
+          "ndk;25.2.9519653"
+        
+        # Проверяем установку
+        ls -la /home/runner/android-sdk
+        /home/runner/android-sdk/platform-tools/adb version
+        
+    - name: Install Buildozer and Cython
+      run: |
         pip install buildozer cython
         
-    - name: Build APK with Buildozer
+    - name: Build APK
       run: |
-        # Настройка переменных окружения Android
-        export ANDROID_SDK_ROOT=/usr/lib/android-sdk
-        export ANDROID_HOME=/usr/lib/android-sdk
-        
-        # Запуск сборки
         buildozer -v android debug
         
     - name: Upload APK
