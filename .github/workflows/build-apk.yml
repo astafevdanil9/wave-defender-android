@@ -14,47 +14,132 @@ jobs:
     - name: Setup for PyGame
       run: |
         sudo apt update
-        # Минимальный набор для pygame
+        # Устанавливаем ВСЕ необходимые зависимости
         sudo apt install -y \
           python3-pip \
           python3-dev \
           git \
+          wget \
+          curl \
+          zip \
+          unzip \
+          build-essential \
+          # SDL2 для pygame
           libsdl2-dev \
           libsdl2-ttf-dev \
           libsdl2-image-dev \
-          libsdl2-mixer-dev
+          libsdl2-mixer-dev \
+          # Для компиляции
+          libssl-dev \
+          libffi-dev \
+          zlib1g-dev
         
-        # Устанавливаем pygame с source
+        # Устанавливаем pygame
         pip3 install pygame==2.5.0 --no-binary pygame
         
         # Buildozer и зависимости
         pip3 install buildozer cython
-        
-    - name: Update buildozer.spec
+
+    - name: Configure buildozer.spec
       run: |
-        # Добавляем настройки для Android
-        echo "" >> buildozer.spec
-        echo "# Android settings" >> buildozer.spec
-        echo "android.api = 33" >> buildozer.spec
-        echo "android.minapi = 21" >> buildozer.spec
-        
-    - name: Build
+        # Полностью перезаписываем buildozer.spec с правильными настройками
+        python3 << 'EOF'
+        import configparser
+
+        config = configparser.ConfigParser()
+
+        # Основные настройки приложения
+        config['app'] = {
+            'title': 'Wave Defender',
+            'package.name': 'wavedefender',
+            'package.domain': 'com.astafevdanil9',
+            'source.dir': '.',
+            'source.main': 'main.py',
+            'version': '1.0',
+            'requirements': 'python3,pygame==2.5.0,sdl2_ttf',
+            'orientation': 'landscape',
+            'fullscreen': '1',
+            'android.archs': 'arm64-v8a',
+            'android.permissions': 'INTERNET, VIBRATE',
+            'android.api': '33',
+            'android.minapi': '21'
+        }
+
+        # КРИТИЧЕСКИ ВАЖНО: настройки buildozer
+        config['buildozer'] = {
+            'warn_on_root': '0',
+            'log_level': '2',
+            'android.accept_sdk_license': 'True'  # Автоматически принимать лицензии
+        }
+
+        # Настройки для p4a (python-for-android)
+        config['p4a'] = {
+            'branch': 'develop',
+            'android_api': '33'
+        }
+
+        with open('buildozer.spec', 'w') as f:
+            config.write(f)
+
+        print("✅ buildozer.spec настроен для автоматического принятия лицензий")
+        EOF
+
+    - name: Build with pre-accepted licenses
       run: |
-        # Создаем swap
-        sudo fallocate -l 2G /swapfile
+        # Создаем swap для компиляции
+        sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        # Собираем
+        echo "=== Начинаем сборку ==="
+        
+        # Очищаем предыдущие сборки
+        rm -rf .buildozer bin 2>/dev/null || true
+        
+        # Запускаем сборку с принудительным принятием лицензий
+        # Способ 1: Используем yes для автоматического ответа
+        yes | buildozer android debug 2>&1 | tee build.log || \
+        # Способ 2: Если не сработало, пробуем с другой версией build-tools
+        echo "Пробуем альтернативный способ..." && \
+        sed -i 's/android.api = 33/android.api = 31/' buildozer.spec && \
         buildozer android debug
         
-        # Очищаем swap
-        sudo swapoff /swapfile
-        sudo rm /swapfile
-    
+        echo "=== Логи сборки ==="
+        tail -30 build.log
+
+    - name: Check and upload APK
+      run: |
+        # Проверяем результат
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "✅ APK создан успешно!"
+          ls -lh bin/*.apk
+          
+          # Загружаем APK
+          echo "Загружаем артефакт..."
+        else
+          echo "⚠️ APK не найден в bin/"
+          echo "Ищем в других местах..."
+          find . -name "*.apk" 2>/dev/null || echo "APK не найдены"
+          
+          # Показываем ошибки
+          if [ -f build.log ]; then
+            echo "=== Ошибки из лога ==="
+            grep -i "error\|fail\|license\|accept" build.log
+          fi
+        fi
+
+    - name: Cleanup
+      if: always()
+      run: |
+        sudo swapoff /swapfile 2>/dev/null || true
+        sudo rm -f /swapfile 2>/dev/null || true
+
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: game-apk
-        path: bin/*.apk
+        name: wave-defender-apk
+        path: |
+          bin/*.apk
+          *.apk
+        if-no-files-found: warn
