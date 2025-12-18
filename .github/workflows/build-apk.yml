@@ -36,57 +36,80 @@ jobs:
           libtinfo5 \
           cmake \
           libffi-dev \
-          libssl-dev
+          libssl-dev \
+          wget
           
         pip3 install --upgrade pip wheel setuptools
         pip3 install buildozer==1.5.0 cython==0.29.33 pygame==2.1.2
         
-    - name: Setup Android SDK and accept licenses
+    - name: Setup Android SDK and ACCEPT LICENSES (КРИТИЧЕСКИ ВАЖНО)
       run: |
         # Устанавливаем переменные окружения
         export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
-        # Создаем файл лицензий вручную (обход проблемы)
-        mkdir -p $ANDROID_SDK_ROOT/licenses
-        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
-        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
-        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
+        echo "=== ПРИНИМАЕМ ЛИЦЕНЗИИ ANDROID SDK ==="
         
-        # Устанавливаем необходимые компоненты напрямую
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        # СПОСОБ 1: Создаем файлы лицензий вручную (гарантировано работает)
+        mkdir -p $ANDROID_SDK_ROOT/licenses
+          cat > $ANDROID_SDK_ROOT/licenses/android-sdk-license << 'EOF'
+        8933bad161af4178b1185d1a37fbf41ea5269c55
+        d56f5187479451eabf01fb78af6dfcb131a6481e
+        24333f8a63b6825ea9c5514f83c2829b004d1fee
+        84831b9409646a918e30573b4ad6cb1653d37abb
+        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
+        79120722343a6f314e0719f863036c702b0e6b2a
+        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
+        85b5a0da6d1e23e8f42d5a1e0c75470e6493b7c7
+        EOF
+        
+        echo "✓ Созданы файлы лицензий"
+        ls -la $ANDROID_SDK_ROOT/licenses/
+        
+        # СПОСОБ 2: Пробуем принять через sdkmanager (дополнительная проверка)
+        echo "=== Пробуем принять лицензии через sdkmanager ==="
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -20 || echo "Продолжаем сборку..."
+        
+        # Устанавливаем необходимые компоненты
+        echo "=== Устанавливаем Android компоненты ==="
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "tools"
         
-    - name: Create buildozer.spec
+        echo "✓ Android SDK настроен"
+        
+    - name: Create buildozer.spec with license acceptance
       run: |
-        # Используем существующий spec файл или создаем минимальный
-        if [ ! -f "buildozer.spec" ]; then
-            cat > buildozer.spec << 'EOF'
+        # Создаем spec с явным указанием принятия лицензий
+          cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
         package.domain = org.test
         source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
+        source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
         requirements = python3, pygame==2.1.2
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
+        # Указываем что лицензии уже приняты
+        android.accept_sdk_license = true
+        android.sdk_path = /usr/local/lib/android/sdk
+        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
-        else
-          echo "Используем существующий buildozer.spec"
-          cat buildozer.spec
-        fi
         
-    - name: Pre-download python-for-android (ИСПРАВЛЕНО)
+        echo "✓ buildozer.spec создан"
+        echo "Содержимое buildozer.spec:"
+        cat buildozer.spec
+        
+    - name: Pre-download python-for-android
       run: |
         mkdir -p .buildozer/android/platform
         cd .buildozer/android/platform
@@ -95,17 +118,29 @@ jobs:
         rm -rf python-for-android
         
         echo "=== Клонируем python-for-android ==="
-        
-        # ВАРИАНТ 1: Используем master ветку (самый простой и надежный)
         git clone --depth 1 https://github.com/kivy/python-for-android.git
         
-        # ИЛИ ВАРИАНТ 2: Используем конкретный тег (нужно клонировать сначала, потом переключиться)
-        # git clone https://github.com/kivy/python-for-android.git
-        # cd python-for-android
-        # git fetch --tags
-        # git checkout 2024.01.21  # или другой тег
-        
         echo "✓ python-for-android успешно скачан"
+        
+    - name: Verify setup before build
+      run: |
+        echo "=== ПРОВЕРКА ПЕРЕД СБОРКОЙ ==="
+        echo "1. Проверяем лицензии:"
+        ls -la /usr/local/lib/android/sdk/licenses/ 2>/dev/null || echo "Директория лицензий не найдена"
+        
+        echo "2. Проверяем Android SDK:"
+        ls -la /usr/local/lib/android/sdk/platforms/ 2>/dev/null || echo "Директория platforms не найдена"
+        
+        echo "3. Проверяем build-tools:"
+        ls -la /usr/local/lib/android/sdk/build-tools/ 2>/dev/null || echo "Директория build-tools не найдена"
+        
+        echo "4. Проверяем main.py:"
+        if [ -f "main.py" ]; then
+          echo "✓ main.py существует ($(wc -l < main.py) строк)"
+        else
+          echo "✗ ОШИБКА: main.py не найден!"
+          exit 1
+        fi
         
     - name: Build APK
       env:
@@ -117,72 +152,70 @@ jobs:
       run: |
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
         
-        echo "=== Проверяем наличие main.py ==="
-        if [ -f "main.py" ]; then
-          echo "✓ main.py найден ($(wc -l < main.py) строк)"
-          echo "Первые 3 строки:"
-          head -3 main.py
-        else
-          echo "✗ ОШИБКА: main.py не найден!"
-          exit 1
-        fi
+        echo "=== НАЧИНАЕМ СБОРКУ WAVE DEFENDER ==="
         
-        echo "=== Проверяем зависимости ==="
-        if [ -f "requirements.txt" ]; then
-          echo "requirements.txt:"
-          cat requirements.txt
-        fi
-        
-        echo "=== Запускаем сборку Wave Defender ==="
-        
-        # Инициализируем если нужно
-        buildozer init 2>&1 | tail -10 || true
+        # Очищаем предыдущие сборки
+        buildozer android clean 2>&1 | tail -10 || true
         
         # Используем системный NDK
         export P4A_NDK_VERSION=27
         
+        echo "Сборка началась... (это может занять 20-40 минут)"
+        echo "Время начала: $(date)"
+        
         # Запускаем сборку с подробным логом
-        echo "Сборка началась (это может занять 20-30 минут)..."
-        timeout 2700 buildozer -v android debug 2>&1 | tee build.log
+        timeout 3600 buildozer -v android debug 2>&1 | tee build.log
+        
+        echo "Время окончания: $(date)"
         
         # Проверяем результат
         if [ -f bin/*.apk ]; then
-          echo "✓ Сборка завершена успешно!"
+          echo "✅ СБОРКА УСПЕШНО ЗАВЕРШЕНА!"
         else
-          echo "⚠ Сборка не удалась, проверяем логи..."
-          tail -200 build.log | grep -A10 -B10 "error\|Error\|ERROR\|fail\|Fail\|FAIL"
+          echo "⚠ Сборка завершилась, но APK не найден"
+          echo "Ищем ошибки в логах..."
         fi
         
     - name: Check and upload APK
       run: |
-        echo "=== Проверка результата ==="
+        echo "=== ФИНАЛЬНАЯ ПРОВЕРКА ==="
+        
         if ls bin/*.apk 1> /dev/null 2>&1; then
-          echo "✅ SUCCESS: APK найден!"
-          APK_FILE=$(ls bin/*.apk)
+          APK_FILE=$(ls bin/*.apk | head -1)
+          echo "✅ УСПЕХ: APK создан!"
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          echo "Дата: $(date -r "$APK_FILE")"
+          echo "Версия: $(date -r "$APK_FILE")"
+          
+          # Показываем информацию о APK
+          echo "Информация о APK:"
+          /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | grep -E "package|launchable" || true
         else
-          echo "❌ FAILED: APK не найден"
-          echo "Ищем логи ошибок..."
+          echo "❌ ОШИБКА: APK не создан"
+          echo "=== АНАЛИЗ ОШИБОК ==="
           
-          # Проверяем наличие логов
           if [ -f "build.log" ]; then
-            echo "Последние ошибки из build.log:"
-            tail -100 build.log | grep -i "error\|fail\|exception"
+            echo "Последние ошибки из лога:"
+            grep -i -A5 -B5 "error\|fail\|exception\|traceback" build.log | tail -100 || echo "Явных ошибок не найдено"
+            
+            echo "Последние 50 строк лога:"
+            tail -50 build.log
           fi
           
-          if [ -d ".buildozer" ]; then
-            echo "Логи buildozer:"
-            find .buildozer -name "*.log" -type f | head -3 | while read log; do
-              echo "=== $log ==="
-              tail -50 "$log" 2>/dev/null || true
-            done
+          # Проверяем наличие лицензий (частая проблема)
+          echo "Проверка лицензий Android SDK:"
+          if [ -d "/usr/local/lib/android/sdk/licenses" ]; then
+            echo "Файлы лицензий:"
+            cat /usr/local/lib/android/sdk/licenses/* 2>/dev/null || echo "Не удалось прочитать лицензии"
+          else
+            echo "Директория лицензий не существует!"
           fi
+          
+          exit 1
         fi
         
     - uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: apk-result
+        name: wave-defender-apk
         path: bin/*.apk
