@@ -3,155 +3,89 @@ name: Build Android APK
 on:
   push:
     branches: [ main, master ]
+  pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Checkout code
-    - uses: actions/checkout@v4
+      # 1. Забираем код
+      - uses: actions/checkout@v4
 
-    # 2. Setup Python 3.9
-    - name: Setup Python 3.9
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
+      # 2. Настраиваем Python
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    # 3. Setup Java 8 and 17
-    - name: Setup Java 8 and 17
-      run: |
-        sudo apt update
-        sudo apt install -y openjdk-8-jdk
-        echo "✅ Java 8 installed"
-        echo "Java 8 version:"
-        java -version
+      # 3. Подготовка main.py
+      - name: Create main.py
+        run: |
+          cat > main.py << 'EOF'
+          from kivy.app import App
+          from kivy.uix.label import Label
 
-        sudo apt install -y openjdk-17-jdk
-        echo "✅ Java 17 installed"
-        echo "Java 17 version:"
-        /usr/lib/jvm/java-17-openjdk-amd64/bin/java -version
+          class TestApp(App):
+              def build(self):
+                  return Label(text="Hello from CI Build!")
 
-    # 4. Install system dependencies
-    - name: Install system dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y python3-pip python3-dev git zip unzip build-essential \
-        libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-        libpango1.0-dev libharfbuzz-dev
-        echo "✅ System dependencies installed"
+          if __name__ == '__main__':
+              TestApp().run()
+          EOF
+          echo "✅ main.py создан"
 
-    # 5. Install Buildozer and Kivy
-    - name: Install Buildozer and Kivy
-      run: |
-        pip install --upgrade pip
-        pip install buildozer cython==0.29.33 kivy==2.1.0
-        echo "✅ Buildozer and Kivy installed"
+      # 4. Подготовка buildozer.spec
+      - name: Create buildozer.spec
+        run: |
+          cat > buildozer.spec << 'EOF'
+          [app]
+          title = TestApp
+          package.name = testapp
+          package.domain = org.example
+          source.dir = .
+          source.include_exts = py,png,jpg,kv,atlas
+          version = 1.0
+          requirements = python3,kivy
+          orientation = portrait
+          android.api = 30
+          android.minapi = 21
+          android.archs = armeabi-v7a
 
-    # 6. Download Android Command Line Tools
-    - name: Download Android Command Line Tools
-      run: |
-        SDK_ROOT="/usr/local/lib/android/sdk"
-        sudo rm -rf "$SDK_ROOT" 2>/dev/null || true
-        sudo mkdir -p "$SDK_ROOT/cmdline-tools"
-        cd /tmp
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        sudo unzip -q commandlinetools-linux-9477386_latest.zip -d "$SDK_ROOT/cmdline-tools"
-        sudo mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
-        echo "✅ Android Command Line Tools installed"
+          [buildozer]
+          log_level = 2
+          android.accept_sdk_license = True
+          EOF
+          echo "✅ buildozer.spec создан"
 
-    # 7. Accept licenses and install components
-    - name: Accept licenses and install SDK components
-      run: |
-        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-        mkdir -p ~/.android
-        echo "count=0" > ~/.android/repositories.cfg
+      # 5. Сборка APK через Buildozer Action (Docker)
+      - name: Build APK with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          workdir: .
+          buildozer_version: stable
 
-        SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-        chmod +x $SDKMANAGER
+      # 6. Загрузка APK как артефакт
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.buildozer.outputs.filename }}
+          if-no-files-found: warn
 
-        yes | $SDKMANAGER --licenses > /dev/null 2>&1
-        $SDKMANAGER "platform-tools" "build-tools;31.0.0" "platforms;android-31" "ndk;21.3.6528147"
-        echo "✅ Android SDK components installed"
-
-    # 8. Find NDK and setup paths
-    - name: Find NDK and setup environment
-      run: |
-        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-        NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -type d | tail -1)
-        if [ -z "$NDK_PATH" ]; then
-          echo "⚠️ NDK not found, creating fallback path"
-          NDK_PATH="$ANDROID_SDK_ROOT/ndk/default"
-          mkdir -p "$NDK_PATH"
-        fi
-        echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-
-    # 9. Prepare main.py and buildozer.spec
-    - name: Prepare application
-      run: |
-        # main.py
-        cat > main.py <<EOF
-        from kivy.app import App
-        from kivy.uix.label import Label
-
-        class TestApp(App):
-            def build(self):
-                return Label(text="Hello from CI Build!")
-
-        if __name__ == '__main__':
-            TestApp().run()
-        EOF
-
-        # buildozer.spec
-        cat > buildozer.spec <<EOF
-        [app]
-        title = TestApp
-        package.name = testapp
-        package.domain = org.example
-        source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 1.0
-        requirements = python3,kivy==2.1.0
-        orientation = portrait
-        android.api = 31
-        android.minapi = 21
-        android.ndk_path = $NDK_PATH
-        android.sdk_path = $ANDROID_SDK_ROOT
-        android.archs = armeabi-v7a
-
-        [buildozer]
-        log_level = 2
-        warn_on_root = 1
-        android.accept_sdk_license = True
-        EOF
-
-        echo "✅ main.py and buildozer.spec prepared"
-
-    # 10. Verify paths
-    - name: Verify required paths
-      run: |
-        for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME_17_X64"; do
-          if [ -z "$path" ] || [ ! -d "$path" ]; then
-            echo "❌ Path does not exist or empty: $path"
-            exit 1
-          fi
-        done
-        echo "✅ All required paths exist"
-
-    # 11. Build APK
-    - name: Build APK
-      run: |
-        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-        export ANDROID_HOME=/usr/local/lib/android/sdk
-        buildozer android debug
-        echo "✅ APK build completed"
-
-    # 12. Upload APK
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: apk
-        path: bin/*.apk
-        if-no-files-found: warn
+      # 7. Отладка при ошибке сборки
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== ОТЛАДКА ==="
+          echo "1. Содержимое текущей директории:"
+          ls -la
+          echo ""
+          echo "2. Buildozer лог:"
+          tail -n 100 .buildozer/android/platform/build.log || echo "Лог не найден"
+          echo ""
+          echo "3. Python версия:"
+          python --version
+          echo "4. Kivy версия:"
+          python -c "import kivy; print(kivy.__version__)"
