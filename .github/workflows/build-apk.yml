@@ -18,90 +18,32 @@ jobs:
       with:
         python-version: '3.9'
         
-    - name: Install system dependencies
+    - name: Install all dependencies in one step
       run: |
         sudo apt-get update
+        
+        # Установка ВСЕХ зависимостей одной командой
         sudo apt-get install -y \
-          python3-pip \
-          python3-venv \
-          build-essential \
-          git \
-          zip \
-          unzip \
-          curl \
-          wget \
-          openjdk-17-jdk \
-          autoconf \
-          automake \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libffi-dev \
-          libssl-dev \
-          libsdl2-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
-          libsdl2-ttf-dev \
-          libxml2-dev \
-          libxslt1-dev \
-          cmake \
-          ninja-build \
-          ccache
+          python3-pip python3-venv python3-dev \
+          build-essential git zip unzip curl wget \
+          openjdk-17-jdk openjdk-17-jre \
+          autoconf libtool pkg-config automake \
+          zlib1g-dev libffi-dev libssl-dev libncurses5-dev \
+          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+          libxml2-dev libxslt1-dev cmake ninja-build ccache \
+          android-sdk android-sdk-platform-31 android-sdk-build-tools \
+          aidl aapt zipalign
         
-    - name: Install Android SDK and NDK
-      run: |
-        # Установка Android SDK
-        cd /usr/local/lib
-        sudo wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        sudo unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk
-        sudo mv android-sdk/cmdline-tools android-sdk/tools
-        
-        # Настройка переменных окружения
-        echo "ANDROID_SDK_ROOT=/usr/local/lib/android-sdk" | sudo tee -a /etc/environment
-        echo "ANDROID_HOME=/usr/local/lib/android-sdk" | sudo tee -a /etc/environment
-        echo "ANDROID_NDK_HOME=/usr/local/lib/android-sdk/ndk/25.2.9519653" | sudo tee -a /etc/environment
-        
-        # Добавление в PATH для текущего процесса
-        export ANDROID_SDK_ROOT=/usr/local/lib/android-sdk
-        export ANDROID_HOME=/usr/local/lib/android-sdk
-        export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools
-        
-        # Принятие лицензий (неинтерактивный режим)
-        yes | sudo $ANDROID_SDK_ROOT/tools/bin/sdkmanager --licenses
-        
-        # Установка ВСЕХ необходимых компонентов для Buildozer
-        sudo $ANDROID_SDK_ROOT/tools/bin/sdkmanager \
-          "platform-tools" \
-          "platforms;android-31" \
-          "platforms;android-30" \
-          "build-tools;31.0.0" \
-          "build-tools;30.0.3" \
-          "ndk;25.2.9519653" \
-          "cmake;3.22.1" \
-          "patcher;v4"
-        
-        # Проверка установки
-        ls -la $ANDROID_SDK_ROOT
-        which aidl
-        which aapt
-        which zipalign
-        
-    - name: Install Buildozer and dependencies
-      run: |
-        pip install --upgrade pip setuptools wheel
-        pip install buildozer cython==0.29.36 virtualenv
+        # Установка pip пакетов
+        pip install buildozer cython
         
     - name: Build APK with Buildozer
       run: |
-        # Очистка предыдущих сборок
-        buildozer android clean || true
+        # Настройка переменных окружения Android
+        export ANDROID_SDK_ROOT=/usr/lib/android-sdk
+        export ANDROID_HOME=/usr/lib/android-sdk
         
-        # Инициализация если нужно
-        if [ ! -f "buildozer.spec" ]; then
-          buildozer init
-        fi
-        
-        # Сборка APK
+        # Запуск сборки
         buildozer -v android debug
         
     - name: Upload APK
@@ -109,4 +51,3 @@ jobs:
       with:
         name: wave-defender-apk
         path: bin/*.apk
-        retention-days: 7
