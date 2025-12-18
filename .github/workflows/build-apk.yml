@@ -11,7 +11,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -39,10 +39,26 @@ jobs:
           libsdl2-mixer-dev \
           libsdl2-ttf-dev
         
-    - name: Install Buildozer
+    - name: Install Android SDK and Build Tools
+      run: |
+        # Установка Android SDK командной строки
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        mkdir -p /usr/local/android-sdk/cmdline-tools
+        unzip commandlinetools-linux-9477386_latest.zip -d /usr/local/android-sdk/cmdline-tools
+        mv /usr/local/android-sdk/cmdline-tools/cmdline-tools /usr/local/android-sdk/cmdline-tools/latest
+        
+        # Добавление в PATH
+        echo 'export ANDROID_SDK_ROOT=/usr/local/android-sdk' >> ~/.bashrc
+        echo 'export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools' >> ~/.bashrc
+        source ~/.bashrc
+        
+        # Принятие лицензий и установка build-tools
+        yes | sdkmanager --licenses
+        sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+        
+    - name: Install Buildozer and Cython
       run: |
         pip install buildozer cython
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
         
     - name: Build APK
       run: |
