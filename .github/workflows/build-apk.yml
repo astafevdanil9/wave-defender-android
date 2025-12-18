@@ -97,34 +97,7 @@ jobs:
         echo "✅ Все лицензии Android приняты"
         echo "Количество лицензий: $(wc -l < ~/.android/licenses/android-sdk-license)"
     
-    - name: Pre-install Android SDK components
-      run: |
-        # Устанавливаем SDK компоненты вручную чтобы избежать лицензионных проблем
-        mkdir -p ~/android-sdk
-        cd ~/android-sdk
-        
-        # Скачиваем Command Line Tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/
-        rm commandlinetools-linux-9477386_latest.zip
-        
-        # Добавляем в PATH
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-        
-        # Ждем обновления PATH
-        sleep 2
-        
-        # Устанавливаем конкретные версии чтобы избежать 36.1
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.0"
-        ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "ndk;25.1.8937393"
-        
-        echo "✅ Android SDK компоненты установлены"
-    
+
     - name: Build APK
       timeout-minutes: 60
       run: |
