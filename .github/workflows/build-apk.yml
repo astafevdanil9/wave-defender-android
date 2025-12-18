@@ -1,175 +1,60 @@
-name: Build Wave Defender APK
+name: Build PyGame Android APK
 
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # Используем последнюю Ubuntu
-
+    runs-on: ubuntu-latest
+    
     steps:
-    # 1. Забираем код
     - uses: actions/checkout@v4
-
-    # 2. Устанавливаем системные зависимости для pygame и SDL2
-    - name: Install system dependencies
+    
+    - name: Setup for PyGame
       run: |
         sudo apt update
+        # Минимальный набор для pygame
         sudo apt install -y \
           python3-pip \
           python3-dev \
-          python3-venv \
           git \
-          zip \
-          unzip \
-          build-essential \
-          # Для pygame и SDL2
           libsdl2-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
           libsdl2-ttf-dev \
-          libportmidi-dev \
-          libswscale-dev \
-          libavformat-dev \
-          libavcodec-dev \
-          # Для компиляции Python
-          libssl-dev \
-          libffi-dev \
-          zlib1g-dev \
-          libncurses5-dev \
-          libgdbm-dev \
-          libnss3-dev \
-          libreadline-dev \
-          libsqlite3-dev \
-          liblzma-dev
-
-    # 3. Устанавливаем Python зависимости
-    - name: Install Python packages
-      run: |
-        pip3 install --upgrade pip setuptools wheel
+          libsdl2-image-dev \
+          libsdl2-mixer-dev
         
-        # Устанавливаем зависимости вашего проекта
-        if [ -f requirements.txt ]; then
-          pip3 install -r requirements.txt
-        fi
-        
-        # Устанавливаем pygame с SDL2 поддержкой
+        # Устанавливаем pygame с source
         pip3 install pygame==2.5.0 --no-binary pygame
         
-        # Обязательные для сборки
-        pip3 install buildozer cython==0.29.36
-
-    # 4. Настраиваем buildozer.spec
-    - name: Configure buildozer for pygame
+        # Buildozer и зависимости
+        pip3 install buildozer cython
+        
+    - name: Update buildozer.spec
       run: |
-        # Создаем правильный buildozer.spec для pygame
-        python3 << 'EOF'
-        import configparser
-
-        config = configparser.ConfigParser()
-        config.read('buildozer.spec')
-
-        # Обновляем requirements для правильной работы с SDL2
-        config['app']['requirements'] = 'python3,pygame==2.5.0,sdl2_ttf'
-
         # Добавляем настройки для Android
-        config['app']['android.api'] = '33'  # Используем API 33
-        config['app']['android.minapi'] = '21'
-        config['app']['android.ndk_api'] = '21'
-
-        # Добавляем настройки p4a для pygame
-        if 'p4a' not in config:
-            config['p4a'] = {}
-        config['p4a']['recipe'] = 'pygame'
-
-        # Buildozer настройки
-        config['buildozer']['log_level'] = '2'
-        config['buildozer']['warn_on_root'] = '0'
-        config['buildozer']['android.accept_sdk_license'] = 'True'
-
-        # Оптимизация для сборки
-        config['buildozer']['p4a.branch'] = 'develop'
-
-        with open('buildozer.spec', 'w') as f:
-            config.write(f)
-
-        print("✅ buildozer.spec настроен для pygame")
-        EOF
-
-    # 5. Увеличиваем swap (важно для сборки pygame)
-    - name: Increase swap memory
+        echo "" >> buildozer.spec
+        echo "# Android settings" >> buildozer.spec
+        echo "android.api = 33" >> buildozer.spec
+        echo "android.minapi = 21" >> buildozer.spec
+        
+    - name: Build
       run: |
-        sudo fallocate -l 4G /swapfile
+        # Создаем swap
+        sudo fallocate -l 2G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
-        echo "Swap создан:"
-        free -h
-
-    # 6. Собираем APK
-    - name: Build Android APK
-      timeout-minutes: 60
-      run: |
-        echo "=== Начинаем сборку Wave Defender ==="
         
-        # Устанавливаем переменные окружения для SDL2
-        export SDL2_CONFIG=$(which sdl2-config 2>/dev/null || echo "")
+        # Собираем
+        buildozer android debug
         
-        # Запускаем сборку с подробным логом
-        buildozer -v android debug 2>&1 | tee build.log
-        
-        echo "=== Статус сборки ==="
-        tail -20 build.log
-
-    # 7. Проверяем результат
-    - name: Check build result
-      run: |
-        echo "=== Результаты сборки ==="
-        
-        if ls bin/*.apk 1> /dev/null 2>&1; then
-          APK_FILE=$(ls bin/*.apk | head -1)
-          echo "✅ APK успешно создан: $APK_FILE"
-          echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          echo "Информация о APK:"
-          file "$APK_FILE"
-        else
-          echo "⚠️  APK не найден"
-          echo "=== Логи сборки ==="
-          tail -100 build.log
-          
-          # Проверяем логи p4a
-          if [ -d .buildozer ]; then
-            echo "=== Логи python-for-android ==="
-            find .buildozer -name "*.log" -exec tail -50 {} \;
-          fi
-        fi
-
-    # 8. Очистка
-    - name: Cleanup
-      if: always()
-      run: |
-        sudo swapoff /swapfile 2>/dev/null || true
-        sudo rm -f /swapfile 2>/dev/null || true
-
-    # 9. Загружаем APK
+        # Очищаем swap
+        sudo swapoff /swapfile
+        sudo rm /swapfile
+    
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: wave-defender-android
+        name: game-apk
         path: bin/*.apk
-        if-no-files-found: warn
-        retention-days: 7
-
-    # 10. Загружаем логи при ошибке
-    - name: Upload logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs-wave-defender
-        path: |
-          build.log
-          .buildozer/
-        retention-days: 7
