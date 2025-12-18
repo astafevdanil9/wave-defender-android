@@ -19,32 +19,40 @@ jobs:
         sudo apt-get install -y openjdk-17-jdk
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
         
-    - name: Установка Android SDK и инструментов
+    - name: Установка Android SDK
       run: |
-        # Создаем директорию для Android SDK
-        mkdir -p ~/android-sdk
+        # Создаем правильную структуру директорий
+        mkdir -p ~/android-sdk/cmdline-tools
         
         # Скачиваем Command Line Tools
-        cd ~/android-sdk
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip commandlinetools-linux-9477386_latest.zip
+        cd ~/android-sdk/cmdline-tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        
+        # Перемещаем содержимое в правильную директорию (latest/)
+        mv cmdline-tools latest
         
         # Настраиваем переменные окружения
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$HOME/android-sdk/cmdline-tools/bin:$PATH" >> $GITHUB_ENV
+        echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
         
+        # Добавляем в PATH для текущего шага
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        
+    - name: Установка компонентов Android SDK
+      run: |
         # Принимаем лицензии
-        yes | ~/android-sdk/cmdline-tools/bin/sdkmanager --licenses || true
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
         
         # Устанавливаем необходимые компоненты
-        ~/android-sdk/cmdline-tools/bin/sdkmanager \
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk \
           "platform-tools" \
           "platforms;android-31" \
           "build-tools;31.0.0" \
           "ndk;25.1.8937393"
           
-        # Добавляем в PATH
+        # Добавляем пути в PATH
         echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
         echo "$HOME/android-sdk/build-tools/31.0.0" >> $GITHUB_PATH
         
@@ -68,13 +76,18 @@ jobs:
           libjpeg-dev \
           libpng-dev \
           libpq-dev \
-          libgstreamer1.0-dev
-          
-    - name: Установка Buildozer и зависимостей Python
+          libgstreamer1.0-dev \
+          pkg-config \
+          autoconf \
+          automake \
+          libtool
+        
+    - name: Установка Buildozer
       run: |
         pip3 install --upgrade pip
         pip3 install buildozer
         pip3 install cython==0.29.36
+        pip3 install virtualenv
         
     - name: Настройка Buildozer
       run: |
@@ -87,24 +100,57 @@ jobs:
         mkdir -p ~/.buildozer/android/platform
         mkdir -p ~/.android
         
+        # Настраиваем спецификацию Buildozer
+        if [ -f "buildozer.spec" ]; then
+          # Обновляем пути в buildozer.spec если нужно
+          sed -i "s|^android.sdk_path =.*|android.sdk_path = $HOME/android-sdk|" buildozer.spec 2>/dev/null || true
+          sed -i "s|^android.ndk_path =.*|android.ndk_path = $HOME/android-sdk/ndk/25.1.8937393|" buildozer.spec 2>/dev/null || true
+        fi
+        
+    - name: Проверка окружения
+      run: |
+        echo "=== Проверка окружения ==="
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo ""
+        echo "Содержимое Android SDK:"
+        ls -la $HOME/android-sdk/
+        echo ""
+        echo "Java версия:"
+        java -version
+        echo ""
+        echo "Android SDK компоненты:"
+        ls -la $HOME/android-sdk/platform-tools/
+        ls -la $HOME/android-sdk/build-tools/
+        ls -la $HOME/android-sdk/platforms/
+        
     - name: Сборка APK
       run: |
-        # Устанавливаем переменные окружения для buildozer
+        # Экспортируем переменные окружения
         export ANDROID_HOME=$HOME/android-sdk
         export ANDROID_SDK_ROOT=$HOME/android-sdk
         export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-        export PATH=$JAVA_HOME/bin:$PATH
+        export PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/31.0.0:$PATH
         
-        # Проверяем установленные компоненты
-        echo "Проверка компонентов:"
-        ls -la $ANDROID_SDK_ROOT/build-tools/
-        ls -la $ANDROID_SDK_ROOT/platforms/
-        
-        # Запускаем сборку
+        # Собираем APK
         buildozer -v android debug
         
     - name: Загрузка APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: wave-defender-apk
         path: bin/*.apk
+        
+    - name: Просмотр логов при ошибке
+      if: failure()
+      run: |
+        echo "=== Логи ошибок ==="
+        if [ -f ".buildozer/android/platform/build.log" ]; then
+          tail -100 .buildozer/android/platform/build.log
+        fi
+        if [ -f "buildozer.spec" ]; then
+          echo "=== Конфигурация buildozer.spec ==="
+          grep -E "^(android\.(sdk|ndk)_path|p4a|requirements)" buildozer.spec || true
+        fi
