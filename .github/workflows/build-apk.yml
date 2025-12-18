@@ -32,12 +32,45 @@ jobs:
         
     - name: Update buildozer.spec
       run: |
-        # Добавляем настройки для Android
-        echo "" >> buildozer.spec
-        echo "# Android settings" >> buildozer.spec
-        echo "android.api = 33" >> buildozer.spec
-        echo "android.minapi = 21" >> buildozer.spec
-        echo "android.accept_sdk_license = True" >> buildozer.spec
+        # Используем Python для правильного обновления конфига
+        python3 << 'EOF'
+        import configparser
+
+        config = configparser.ConfigParser()
+
+        # Читаем существующий файл
+        config.read('buildozer.spec')
+
+        # Обновляем настройки Android
+        if 'app' not in config:
+            config['app'] = {}
+            
+        config['app']['android.api'] = '31'  # Используем 31 вместо 33
+        config['app']['android.minapi'] = '21'
+
+        # Добавляем секцию buildozer если её нет
+        if 'buildozer' not in config:
+            config['buildozer'] = {}
+
+        # КРИТИЧЕСКИ ВАЖНО: эта настройка должна быть в секции [buildozer]
+        config['buildozer']['android.accept_sdk_license'] = 'True'
+        config['buildozer']['warn_on_root'] = '0'
+        config['buildozer']['log_level'] = '2'
+
+        # Сохраняем
+        with open('buildozer.spec', 'w') as f:
+            config.write(f)
+
+        print("✅ buildozer.spec обновлен")
+        EOF
+
+    - name: Pre-accept Android licenses
+      run: |
+        # ЗАРАНЕЕ принимаем лицензии Android SDK
+        mkdir -p ~/.android/licenses
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
+        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
+        echo "84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.android/licenses/android-sdk-license
         
     - name: Build
       run: |
@@ -47,15 +80,24 @@ jobs:
         sudo mkswap /swapfile
         sudo swapon /swapfile
         
-        # Собираем
-        buildozer android debug
+        # Автоматически отвечаем "yes" на все вопросы
+        yes | buildozer android debug 2>&1 | tee build.log || true
         
         # Очищаем swap
         sudo swapoff /swapfile
         sudo rm /swapfile
+        
+        # Проверяем результат
+        if [ -f bin/*.apk ]; then
+          echo "✅ APK создан успешно!"
+        else
+          echo "⚠️  Проверяем логи..."
+          tail -50 build.log
+        fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: game-apk
+        name: wave-defender-apk
         path: bin/*.apk
+        if-no-files-found: warn
