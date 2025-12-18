@@ -10,8 +10,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Setup environment
+
+    - name: Set up environment and modern Android CLI tools
       run: |
         sudo apt update
         sudo apt install -y \
@@ -35,51 +35,22 @@ jobs:
           libssl-dev
           
         pip3 install --upgrade pip wheel setuptools
-        pip3 install buildozer==1.4.0 cython==0.29.33 pygame==2.1.2
+        pip3 install buildozer cython pygame==2.1.2
         
-    - name: Accept Android SDK licenses
-      run: |
-        # Принимаем лицензии Android SDK
-        yes | sudo /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+        # ГАРАНТИРУЕМ, что используем современные CLI Tools, а не старые 'tools/'
+        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+        export ANDROID_HOME=$ANDROID_SDK_ROOT
+        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
-        # Устанавливаем необходимые платформы и инструменты
-        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager \
+        # Принимаем лицензии с использованием корректного пути
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        
+        # Устанавливаем необходимые платформы и инструменты через корректную команду
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
           "platforms;android-30" \
           "build-tools;30.0.3" \
-          "platform-tools" \
-          "tools"
-        
-    - name: Initialize Buildozer project
-      run: |
-        # Инициализируем buildozer если spec файла нет
-        if [ ! -f buildozer.spec ]; then
-          buildozer init
-        fi
-        
-        # Обновляем существующий spec файл
-          cat > buildozer.spec << 'EOF'
-        [app]
-        title = Wave Defender
-        package.name = wavedefender
-        package.domain = org.test
-        source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 1.0
-        requirements = python3, pygame==2.1.2, kivy
-        android.api = 30
-        android.minapi = 21
-        android.sdk = 30
-        android.ndk = 25.1.8937393
-        android.archs = armeabi-v7a
-        android.accept_sdk_license = True
-        android.sdk_path = /usr/local/lib/android/sdk
-        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
+          "platform-tools"
 
-        [buildozer]
-        log_level = 2
-        warn_on_root = 0
-        EOF
-        
     - name: Download python-for-android
       run: |
         # Скачиваем python-for-android вручную если нужно
@@ -91,49 +62,62 @@ jobs:
           # Используем последний стабильный тег
           git checkout $(git describe --tags $(git rev-list --tags --max-count=1)) || git checkout master
         fi
-        
+
+    - name: Configure Buildozer
+      run: |
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = org.test
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 1.0
+        requirements = python3, pygame==2.1.2
+        android.api = 30
+        android.minapi = 21
+        android.archs = armeabi-v7a
+        # КРИТИЧЕСКИ ВАЖНО: указываем путь к SDK без подпапки tools/
+        android.sdk_path = /usr/local/lib/android/sdk
+        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
+        android.accept_sdk_license = False  # Управляем через yes | sdkmanager выше
+
+        [buildozer]
+        log_level = 2
+        warn_on_root = 0
+        EOF
+
     - name: Build APK
       env:
+        # Явно задаем переменные для всего шага
         ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
+        JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
       run: |
-        # Устанавливаем правильные пути в PATH
+        # Экспортируем PATH с корректными инструментами
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
         
-        # Сначала инициализируем buildozer
-        echo "=== Step 1: Initialize buildozer ==="
-        buildozer android update 2>&1 | tail -50 || true
+        echo "=== Проверка путей ==="
+        which sdkmanager
+        java -version
         
-        # Очищаем предыдущие сборки
-        echo "=== Step 2: Clean old builds ==="
-        rm -rf .buildozer/android/build
-        rm -rf .buildozer/android/platform/build
-        
-        # Собираем APK
-        echo "=== Step 3: Build APK ==="
-        buildozer android debug 2>&1 | tail -200
-        
+        echo "=== Сборка APK (это займет время) ==="
+        # Запускаем сборку. Используем timeout на случай зависания.
+        timeout 1800 buildozer android debug 2>&1 | tail -200
+
     - name: Check for APK
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           echo "✅ APK найден!"
-          ls -la bin/*.apk
-          echo "Размер APK: $(du -h bin/*.apk | cut -f1)"
+          ls -lah bin/
         else
-          echo "❌ APK не найден"
-          echo "=== Проверяем логи ==="
-          if [ -f .buildozer/android/platform/build-armeabi-v7a/build.json ]; then
-            echo "Последние строки из build.json:"
-            tail -20 .buildozer/android/platform/build-armeabi-v7a/build.json
-          fi
-          if ls .buildozer/*.log 1> /dev/null 2>&1; then
-            echo "Последние ошибки из логов:"
-            tail -100 .buildozer/*.log
-          fi
+          echo "❌ APK не найден. Возможные причины:"
+          echo "1. Недостаточно времени на сборку (таймаут)"
+          echo "2. Ошибка в зависимостях Python"
+          echo "3. Проблемы с NDK"
         fi
-        
+
     - uses: actions/upload-artifact@v4
       if: success()
       with:
