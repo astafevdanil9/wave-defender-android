@@ -14,74 +14,72 @@ jobs:
     - name: Setup
       run: |
         sudo apt update
-        sudo apt install -y python3-pip openjdk-11-jdk
+        sudo apt install -y python3-pip git zip unzip openjdk-11-jdk
         pip3 install buildozer==1.4.0 cython==0.29.33 pygame==2.1.2 
     
-    - name: Create minimal spec
+    - name: Setup Android SDK environment
       run: |
-        # Минимальный конфиг - buildozer сам скачает нужные версии
+        # Принимаем лицензии Android SDK
+        yes | sudo /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+        
+        # Устанавливаем необходимые компоненты
+        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;30.0.3" "platform-tools"
+    
+    - name: Create buildozer.spec with correct paths
+      run: |
           cat > buildozer.spec << 'EOF'
         [app]
-        title = App
-        package.name = app
+        title = Wave Defender
+        package.name = wavedefender
         package.domain = org.test
         source.dir = .
         version = 1.0
-        requirements = python3
+        requirements = python3, pygame
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
+        android.sdk_path = /usr/local/lib/android/sdk
+        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
+        android.accept_sdk_license = True
 
         [buildozer]
-        warn_on_root = 0
         log_level = 2
+        warn_on_root = 0
         EOF
-        
-        echo 'print("Hello")' > main.py
     
-    - name: Accept Android SDK licenses
+    - name: Build APK
       run: |
-        mkdir -p ~/.android
-        echo "### User Sources for Android Tool ###" > ~/.android/repositories.cfg
-        # Принимаем все лицензии Android SDK
-        yes | /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
-        # Альтернативный способ - установка переменной окружения
-        mkdir -p /tmp/licenses
-        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > /tmp/licenses/android-sdk-license
-        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> /tmp/licenses/android-sdk-license
-        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> /tmp/licenses/android-sdk-license
-        echo "84831b9409646a918e30573b4ad6cb1653d37abb" >> /tmp/licenses/android-sdk-license
-        echo "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" >> /tmp/licenses/android-sdk-license
-        echo "79120722343a6f314e0719f863036c702b0e6b2a" >> /tmp/licenses/android-sdk-license
-        echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" >> /tmp/licenses/android-sdk-license
-        echo "85b5a0da6d1e23e8f42d5a1e0c75470e6493b7c7" >> /tmp/licenses/android-sdk-license
-    
-    - name: Build with auto-download
-      run: |
-        # Устанавливаем переменную окружения для автоматического принятия лицензий
-        export ANDROID_HOME="/home/runner/.buildozer/android/platform/android-sdk"
-        mkdir -p ~/.android
-        touch ~/.android/repositories.cfg
+        # Устанавливаем правильные пути
+        export ANDROID_HOME=/usr/local/lib/android/sdk
+        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+        export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
+        export ANDROID_NDK_ROOT=/usr/local/lib/android/sdk/ndk/27.3.13750724
+        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
         
-        # Пытаемся принять лицензии через sdkmanager
-        if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-        fi
+        # Принудительно обновляем buildozer
+        buildozer android clean
         
-        # Запускаем buildozer с автоматическим принятием лицензий
-        echo "y" | buildozer android debug 2>&1 | tail -100
-        
-        # Пробуем еще раз с явным указанием принять лицензии
+        # Пробуем разные варианты сборки
+        echo "Вариант 1: Стандартная сборка"
         buildozer android debug 2>&1 | tail -100 || true
+        
+        # Если не сработало, пробуем с опцией --verbose
+        echo "Вариант 2: Сборка с --verbose"
+        buildozer android debug --verbose 2>&1 | tail -150 || true
     
     - name: Check for APK
       run: |
-        if [ -f bin/*.apk ]; then
-          echo "APK найден!"
-          ls -la bin/
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ APK найден!"
+          ls -la bin/*.apk
         else
-          echo "APK не найден, проверьте логи выше"
+          echo "❌ APK не найден"
+          echo "Проверяем структуру каталогов:"
           ls -la
+          if [ -d .buildozer ]; then
+            echo "Содержимое .buildozer:"
+            find .buildozer -type f -name "*.log" | head -5 | xargs tail -50
+          fi
         fi
     
     - uses: actions/upload-artifact@v4
