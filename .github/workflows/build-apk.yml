@@ -28,6 +28,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
+            python3.10 \
+            python3.10-venv \
+            python3.10-dev \
             python3-pip \
             python3-setuptools \
             python3-wheel \
@@ -43,10 +46,12 @@ jobs:
       # 5. Установка Buildozer и зависимостей Python
       - name: Install Buildozer
         run: |
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+          python3 --version
           pip3 install --upgrade pip
-          pip3 install buildozer
           pip3 install cython==0.29.33
           pip3 install virtualenv
+          pip3 install buildozer
           pip3 install kivy==2.1.0
 
       # 6. Установка NDK, Build-tools и платформ Android
@@ -131,59 +136,57 @@ jobs:
           android.permission.INTERNET
           EOF
 
-                # Подставляем реальные пути
-                sed -i "s|__ANDROID_SDK_ROOT__|${ANDROID_SDK_ROOT//cmdline-tools/latest}|g" buildozer.spec
-                sed -i "s|__ANDROID_NDK_PATH__|${NDK_PATH//ndk}|g" buildozer.spec
+          # Подставляем реальные пути
+          sed -i "s|__ANDROID_SDK_ROOT__|${ANDROID_SDK_ROOT}|g" buildozer.spec
+          sed -i "s|__ANDROID_NDK_PATH__|${NDK_PATH}|g" buildozer.spec
 
-                echo "main.py and buildozer.spec prepared"
+          echo "main.py and buildozer.spec prepared"
 
-            # 9. Настройка переменных окружения
-            - name: Setup environment variables
-              run: |
-                echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-                echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-                echo "JAVA_HOME_17_X64=$JAVA_HOME_17_X64" >> $GITHUB_ENV
+      # 9. Настройка переменных окружения
+      - name: Setup environment variables
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
 
-                echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
-                echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-                echo "$ANDROID_SDK_ROOT/build-tools/31.0.0" >> $GITHUB_PATH
+      # 10. Финальная проверка путей перед сборкой
+      - name: Final verification before build
+        run: |
+          for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$(which python3)"; do
+            if [ ! -d "$path" ]; then
+              echo "❌ Path does not exist: $path"
+              exit 1
+            fi
+          done
+          echo "✅ All required paths exist"
 
-            # 10. Финальная проверка путей перед сборкой
-            - name: Final verification before build
-              run: |
-                for path in "$ANDROID_SDK_ROOT" "$NDK_PATH" "$JAVA_HOME_17_X64"; do
-                  if [ ! -d "$path" ]; then
-                    echo "❌ Path does not exist: $path"
-                    exit 1
-                  fi
-                done
-                echo "✅ All required paths exist"
+      # 11. Сборка APK
+      - name: Build APK
+        run: |
+          buildozer -v android debug
 
-            # 11. Сборка APK
-            - name: Build APK
-              run: |
-                buildozer -v android debug
+      # 12. Загрузка APK как артефакт
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: bin/*.apk
+          if-no-files-found: error
 
-            # 12. Загрузка APK как артефакт
-            - name: Upload APK
-              uses: actions/upload-artifact@v4
-              with:
-                name: android-apk
-                path: bin/*.apk
-                if-no-files-found: error
+      # 13. Отладка при ошибке
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Debug info ==="
+          ls -la
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          echo "NDK_PATH: $NDK_PATH"
+          echo "Python: $(python3 --version)"
 
-            # 13. Отладка при ошибке
-            - name: Debug on failure
-              if: failure()
-              run: |
-                echo "=== Debug info ==="
-                ls -la
-                find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
-                echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-                echo "NDK_PATH: $NDK_PATH"
-                echo "JAVA_HOME_17_X64: $JAVA_HOME_17_X64"
-
-                if [ -f ".buildozer/android/platform/build.log" ]; then
-                  echo "=== Last 100 lines of Buildozer log ==="
-                  tail -100 .buildozer/android/platform/build.log
-                fi
+          if [ -f ".buildozer/android/platform/build.log" ]; then
+            echo "=== Last 100 lines of Buildozer log ==="
+            tail -100 .buildozer/android/platform/build.log
+          fi
