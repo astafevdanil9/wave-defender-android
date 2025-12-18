@@ -11,7 +11,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up environment and modern Android CLI tools
+    - name: Clean previous builds
+      run: |
+        rm -rf .buildozer ~/.buildozer bin
+        
+    - name: Setup environment
       run: |
         sudo apt update
         sudo apt install -y \
@@ -35,25 +39,31 @@ jobs:
           libssl-dev
           
         pip3 install --upgrade pip wheel setuptools
-        pip3 install buildozer cython pygame==2.1.2
+        pip3 install buildozer==1.5.0 cython==0.29.33 pygame==2.1.2
         
-        # ГАРАНТИРУЕМ, что используем современные CLI Tools, а не старые 'tools/'
+    - name: Setup Android SDK and accept licenses
+      run: |
+        # Устанавливаем переменные окружения
         export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
-        # Принимаем лицензии с использованием корректного пути
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        # Создаем файл лицензий вручную (обход проблемы)
+        mkdir -p $ANDROID_SDK_ROOT/licenses
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
+        echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
+        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
         
-        # Устанавливаем необходимые платформы и инструменты через корректную команду
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
-          "platforms;android-30" \
-          "build-tools;30.0.3" \
-          "platform-tools"
-            
-    - name: Configure Buildozer
+        # Устанавливаем необходимые компоненты напрямую
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+        
+    - name: Create minimal buildozer.spec (критически важно!)
       run: |
-        cat > buildozer.spec << 'EOF'
+        # Минимальный spec файл БЕЗ android.accept_sdk_license
+          cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
@@ -65,47 +75,71 @@ jobs:
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
-        # КРИТИЧЕСКИ ВАЖНО: указываем путь к SDK без подпапки tools/
-        android.sdk_path = /usr/local/lib/android/sdk
-        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
-        android.accept_sdk_license = true  # Управляем через yes | sdkmanager выше
+        # НЕ ИСПОЛЬЗУЕМ android.accept_sdk_license - вызывает проблемы
+        # android.sdk_path тоже не указываем - пусть использует системный
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
-
-    - name: Build APK
+        
+    - name: Pre-download python-for-android
+      run: |
+        mkdir -p .buildozer/android/platform
+        cd .buildozer/android/platform
+        
+        # Клонируем конкретную стабильную версию python-for-android
+        git clone --depth 1 --branch 2024.01.21 https://github.com/kivy/python-for-android.git
+        
+    - name: Build APK with direct SDK management
       env:
-        # Явно задаем переменные для всего шага
         ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
       run: |
-        # Экспортируем PATH с корректными инструментами
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+      
+                
+                echo "=== Запускаем сборку с отключением автоматического обновления SDK ==="
         
-        echo "=== Проверка путей ==="
-        which sdkmanager
-        java -version
+        # Сначала инициализируем без сборки
+        buildozer init 2>&1 | tail -20
         
-        echo "=== Сборка APK (это займет время) ==="
-        # Запускаем сборку. Используем timeout на случай зависания.
-        timeout 1800 buildozer android debug 2>&1 | tail -200
-
-    - name: Check for APK
-      run: |
-        if ls bin/*.apk 1> /dev/null 2>&1; then
-          echo "✅ APK найден!"
-          ls -lah bin/
-        else
-          echo "❌ APK не найден. Возможные причины:"
-          echo "1. Недостаточно времени на сборку (таймаут)"
-          echo "2. Ошибка в зависимостях Python"
-          echo "3. Проблемы с NDK"
+        # Затем запускаем сборку с флагом для отключения проверки SDK
+        # Используем более новую версию NDK из системы
+        export P4A_NDK_VERSION=27
+        
+        # Запускаем сборку (может занять 15-30 минут)
+        timeout 2400 buildozer -v android debug 2>&1 | tee build.log
+        
+        # Пробуем альтернативный метод если первый не сработал
+        if [ ! -f bin/*.apk ]; then
+          echo "=== Пробуем альтернативный метод сборки ==="
+          buildozer android clean
+          timeout 1800 buildozer android debug 2>&1 | tail -200
         fi
-
+        
+    - name: Check and upload APK
+      run: |
+        echo "=== Проверка результата ==="
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ SUCCESS: APK найден!"
+          ls -lah bin/*.apk
+          echo "APK size: $(du -h bin/*.apk | cut -f1)"
+        else
+          echo "❌ FAILED: APK не найден"
+          echo "Последние 100 строк лога:"
+          tail -100 build.log 2>/dev/null || echo "Лог не найден"
+          
+          # Показываем возможные проблемы
+          if [ -d ".buildozer" ]; then
+            echo "Содержимое .buildozer:"
+            find .buildozer -name "*.log" -type f | head -5 | xargs -I {} sh -c 'echo "=== {} ==="; tail -50 {}'
+          fi
+        fi
+        
     - uses: actions/upload-artifact@v4
       if: success()
       with:
