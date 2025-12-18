@@ -11,14 +11,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup environment
+    - name: Setup environment with Python 3.9
       run: |
         sudo apt update
-        sudo apt install -y python3-pip python3-venv python3.9 python3.9-dev python3.9-venv
+        # Добавляем PPA с Python 3.9
+        sudo apt install -y software-properties-common
+        sudo add-apt-repository -y ppa:deadsnakes/ppa
+        sudo apt update
         
+        # Устанавливаем Python 3.9
+        sudo apt install -y python3.9 python3.9-dev python3.9-venv python3.9-distutils
+        
+        # Создаем виртуальное окружение
         python3.9 -m venv venv
         source venv/bin/activate
+        
+        # Устанавливаем зависимости
+        pip install --upgrade pip setuptools wheel
         pip install buildozer cython==0.29.33 pygame==2.5.0
+        
+        echo "✅ Python 3.9 и зависимости установлены"
     
     - name: Create buildozer.spec with Python 3.9
       run: |
