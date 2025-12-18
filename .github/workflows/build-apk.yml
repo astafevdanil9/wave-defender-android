@@ -27,7 +27,7 @@ jobs:
     
     - name: Create buildozer.spec with correct paths
       run: |
-          cat > buildozer.spec << 'EOF'
+        cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
