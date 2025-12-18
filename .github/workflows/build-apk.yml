@@ -26,10 +26,10 @@ jobs:
     # 3. Install system dependencies
     - name: Install system dependencies
       run: |
-        sudo apt update
-        sudo apt install -y python3-pip python3-dev git zip unzip build-essential \
-          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libpango1.0-dev libharfbuzz-dev openjdk-8-jdk wget unzip
+          sudo apt update
+          sudo apt install -y python3-pip python3-dev git zip unzip tar build-essential \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libpango1.0-dev libharfbuzz-dev openjdk-8-jdk wget curl
 
     # 4. Install Buildozer and Kivy
     - name: Install Buildozer and Kivy
