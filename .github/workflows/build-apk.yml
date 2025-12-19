@@ -123,42 +123,15 @@ jobs:
         echo "✓ buildozer.spec создан с webview bootstrap"
         cat buildozer.spec
         
-    - name: Setup python-for-android with forced Python 3.8
+    - name: Setup python-for-android (без патчей - пусть Buildozer сам управляет)
       run: |
-        echo "=== Настройка python-for-android с принудительным Python 3.8 ==="
+        echo "=== Настройка python-for-android ==="
+        
+        # Просто создаем директорию, Buildozer сам скачает нужную версию
         mkdir -p .buildozer/android/platform
-        cd .buildozer/android/platform
         
-        # Удаляем старую версию если есть
-        rm -rf python-for-android 2>/dev/null || true
-        
-        echo "Клонируем python-for-android с конкретной веткой..."
-        # Клонируем стабильную ветку
-        git clone --depth 1 --branch 2024.01.21 https://github.com/kivy/python-for-android.git
-        
-        cd python-for-android
-        
-        echo "Принудительно меняем Python на 3.8.16..."
-        
-        # Находим и изменяем ВСЕ файлы с Python версией
-        find . -name "*.py" -type f -exec grep -l "version.*=.*'3\." {} \; | while read file; do
-          echo "Патчим $file"
-          # Меняем любую версию Python 3.x на 3.8.16
-          sed -i "s/version.*=.*'3\.[0-9]*\.[0-9]*'/version = '3.8.16'/g" "$file" 2>/dev/null || true
-          sed -i "s/'3\.[0-9]*\.[0-9]*'/'3.8.16'/g" "$file" 2>/dev/null || true
-        done
-        
-        # Также патчим конкретный файл рецепта
-        PYTHON3_RECIPE="pythonforandroid/recipes/python3/__init__.py"
-        if [ -f "$PYTHON3_RECIPE" ]; then
-          echo "Принудительно устанавливаем Python 3.8.16 в $PYTHON3_RECIPE"
-          # Полностью заменяем версию
-          sed -i "s/version = .*/version = '3.8.16'/" "$PYTHON3_RECIPE"
-          echo "Содержимое после патча:"
-          grep -n "version = " "$PYTHON3_RECIPE"
-        fi
-        
-        echo "✓ python-for-android настроен с Python 3.8.16"
+        echo "Buildozer сам скачает нужную версию python-for-android"
+        echo "Не патчим вручную - это вызывает проблемы"
         
     - name: Create minimal test app for debugging
       run: |
