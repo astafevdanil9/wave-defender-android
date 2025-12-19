@@ -12,6 +12,10 @@ fullscreen = 1
 android.archs = arm64-v8a
 android.permissions = INTERNET, VIBRATE
 
+[android]
+android.api = 33
+android.build_tools_version = 33.0.2
+
 [buildozer]
 warn_on_root = 0
 log_level = 2
