@@ -4,7 +4,9 @@ package.name = wavedefender
 package.domain = com.astafevdanil9
 
 source.dir = .
-source.main = main.py
+source.main = main.py\
+version = 1.0.0
+
 
 requirements = python3==3.10,kivy==2.2.1,pygame
 
