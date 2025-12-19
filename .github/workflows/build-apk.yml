@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # старше, чтобы libtinfo5 был доступен
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -15,13 +15,30 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'  # совместим с Kivy 2.2.1
+          python-version: '3.10'
+
+      - name: Setup Android SDK
+        run: |
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          cd $HOME/android-sdk/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip commandlinetools-linux-11076708_latest.zip
+          mv cmdline-tools latest
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+          $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        env:
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_FORCE_ACCEPT_LICENSES: "YES"
 
       - name: Build APK
         uses: digreatbrian/buildozer-action@v2
         with:
-          python-version: '3.10'
           buildozer-cmd: 'buildozer android debug'
+        env:
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_FORCE_ACCEPT_LICENSES: "YES"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
