@@ -148,80 +148,84 @@ jobs:
         
         echo "✓ python-for-android успешно скачан"
         
-    - name: Build APK with patched environment
+    - name: Build APK
       env:
-        # Явно задаем пути к СОВРЕМЕННЫМ инструментам
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
-        # Отключаем авто-обновление SDK внутри buildozer
-        BUILDOCER_SKIP_SDK_UPDATE: 1
       run: |
-        # Форсируем использование cmdline-tools
+        echo "=== НАЧАЛО СБОРКИ APK ==="
+        
+        # Устанавливаем правильные пути
         export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
         
-        # Удаляем старый tools если он снова появился
-        rm -rf /usr/local/lib/android/sdk/tools 2>/dev/null || true
-        
-        echo "=== ПРОВЕРКА ИНСТРУМЕНТОВ ==="
-        echo "Проверяем sdkmanager:"
-        which sdkmanager
-        sdkmanager --version 2>&1 | head -5 || echo "Не удалось получить версию"
-        
-        echo "Проверяем Java:"
+        echo "Проверка окружения:"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "JAVA_HOME: $JAVA_HOME"
+        which java
         java -version
         
-        echo "=== НАЧИНАЕМ СБОРКУ ==="
+        echo "Время начала: $(date)"
         
-        # Создаем симлинк чтобы buildozer находил cmdline-tools как tools
-        mkdir -p /tmp/android-sdk-tools
-        ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /tmp/android-sdk-tools/sdkmanager 2>/dev/null || true
+        # Запускаем buildozer с подробным логированием
+        echo "Запускаем buildozer android debug..."
         
-        # Запускаем сборку с минимальной проверкой SDK
-        echo "Запускаем buildozer..."
+        # СОЗДАЕМ ФАЙЛ ЛОГА ГАРАНТИРОВАННО
+        touch build.log
+        chmod 644 build.log
         
-        # Используем прямое выполнение с переопределением
-        python3 -m buildozer android debug \
-          --skip-check-sdk \
-          --skip-check-android-sdk \
-          2>&1 | tee build.log
+        # Запускаем сборку с записью в файл и выводом в консоль
+        timeout 1800 buildozer -v android debug 2>&1 | tee -a build.log
         
-        echo "Сборка завершена в $(date)"
+        echo "Время окончания: $(date)"
+        echo "✓ Сборка завершена"
         
-    - name: Check result and upload
+    - name: Check build result
       run: |
-        echo "=== ПРОВЕРКА РЕЗУЛЬТАТА ==="
+        echo "=== ПРОВЕРКА РЕЗУЛЬТАТА СБОРКИ ==="
         
+        # Проверяем наличие APK
         if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
           echo "✅ УСПЕХ: APK создан!"
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          
-          # Выводим базовую информацию о APK
-          if [ -f "/usr/local/lib/android/sdk/build-tools/30.0.3/aapt" ]; then
-            echo "Информация о пакете:"
-            /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | \
-              grep -E "package:|launchable-activity:|application:" | head -3 || true
-          fi
+          echo "Дата создания: $(stat -c %y "$APK_FILE")"
         else
           echo "❌ ОШИБКА: APK не создан"
-          echo "=== АНАЛИЗ ЛОГА ==="
           
+          echo "=== ПОИСК ОШИБОК ==="
+          
+          # Проверяем существование лог-файла
           if [ -f "build.log" ]; then
-            echo "Последние ошибки:"
-            grep -i -B5 -A5 "error\|exception\|fail\|traceback" build.log | tail -50 || echo "Явных ошибок не найдено"
+            echo "Файл build.log найден, размер: $(du -h build.log | cut -f1)"
+            echo "Последние 100 строк лога:"
+            tail -100 build.log
             
-            echo "=== КРИТИЧЕСКАЯ ПРОВЕРКА ==="
-            echo "1. Проверяем путь к sdkmanager:"
-            ls -la /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager 2>/dev/null || echo "sdkmanager не найден!"
+            echo "=== ОШИБКИ В ЛОГЕ ==="
+            grep -i "error\|exception\|fail\|traceback" build.log | tail -20 || echo "Явных ошибок не найдено"
+          else
+            echo "⚠ Файл build.log не найден!"
             
-            echo "2. Проверяем старый tools:"
-            if [ -d "/usr/local/lib/android/sdk/tools" ]; then
-              echo "⚠ ВНИМАНИЕ: старый tools/ все еще существует!"
-              rm -rf /usr/local/lib/android/sdk/tools
-            fi
+            # Ищем другие логи
+            echo "Ищем другие логи buildozer..."
+            find . -name "*.log" -type f 2>/dev/null | head -5 | while read logfile; do
+              echo "=== $logfile ==="
+              tail -20 "$logfile"
+            done
+          fi
+          
+          # Проверяем директорию сборки
+          echo "=== ПРОВЕРКА ДИРЕКТОРИЙ ==="
+          if [ -d ".buildozer" ]; then
+            echo "Директория .buildozer существует"
+            ls -la .buildozer/
+          fi
+          
+          if [ -d "bin" ]; then
+            echo "Директория bin существует, содержимое:"
+            ls -la bin/
           fi
           
           exit 1
@@ -232,3 +236,12 @@ jobs:
       with:
         name: wave-defender-apk
         path: bin/*.apk
+        
+    - name: Upload build logs (if failed)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          build.log
+          .buildozer/*.log
