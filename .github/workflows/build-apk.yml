@@ -112,7 +112,7 @@ jobs:
         version = 1.0
         # Начинаем с чистого Python для теста
         requirements = python3
-        android.api = 29  # API 29 более совместим
+        android.api = 29  
         android.minapi = 21
         android.archs = armeabi-v7a
         android.accept_sdk_license = true
@@ -127,7 +127,7 @@ jobs:
         # КРИТИЧЕСКИ ВАЖНО: Настройки Gradle
         [app:gradle]
         gradle_version = 7.5.1
-        android_gradle_plugin_version = 4.2.2  # Совместим с Gradle 7.5.1
+        android_gradle_plugin_version = 4.2.2  
 
         # Переменные окружения для Gradle
         [app:env]
