@@ -160,6 +160,14 @@ jobs:
         EOF
         
         echo "✓ Gradle wrapper настроен на версию 7.5.1"
+    - name: Quick fix for orientation error
+      run: |
+        # Временный фикс - удаляем ориентацию из всех spec файлов
+        sed -i '/android\.orientation/d' buildozer.spec 2>/dev/null || true
+        
+        # Или устанавливаем дефолтное значение
+        echo "android.orientation = portrait" >> buildozer.spec
+            
         
     - name: Build with Gradle 7.5.1
       env:
@@ -185,7 +193,7 @@ jobs:
         timeout 4200 buildozer -v android debug 2>&1 | tee -a build.log
         
         echo "Окончание сборки: $(date)"
-        
+      
     - name: Alternative build with Kivy if basic works
       if: success()
       run: |
