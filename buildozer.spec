@@ -4,8 +4,9 @@ package.name = wavedefender
 package.domain = com.astafevdanil9
 source.dir = .
 source.main = main.py
+source.include_exts = py,png,jpg,ttf,ogg,wav
 version = 1.0.0
-requirements = python3==3.11, kivy==2.3.0, pygame, sdl2_ttf
+requirements = python3==3.10, kivy==2.2.1, pygame
 orientation = portrait
 fullscreen = 1
 android.archs = arm64-v8a
