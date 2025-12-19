@@ -60,14 +60,21 @@ jobs:
             "platforms;android-33" \
             "build-tools;33.0.2"
 
-      - name: Install buildozer
+      - name: Install buildozer (pinned)
         run: |
           pip3 install --upgrade pip
-          pip3 install buildozer cython==0.29.36
+          pip3 install \
+            cython==0.29.36 \
+            buildozer==1.5.0 \
+            python-for-android==2023.09.16
+
+      - name: Remove buildozer SDK
+        run: |
+          rm -rf ~/.buildozer/android || true
 
       - name: Clean buildozer
         run: |
-          buildozer android clean || true 
+          buildozer android clean || true
 
       - name: Build APK
         run: |
