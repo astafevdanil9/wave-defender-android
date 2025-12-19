@@ -1,60 +1,76 @@
 # .github/workflows/android.yml
-name: Modern Android Build with BEEM
+name: Build APK with BEEM
 
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  release:
-    types: [published]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/kivy/beem-builder:latest
-      
+    runs-on: ubuntu-latest  # Use a standard GitHub runner
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        fetch-depth: 0
-    
-    - name: Build APK with BEEM
+        python-version: '3.11'
+
+    - name: Install system dependencies
       run: |
-        # Инициализация проекта
+        sudo apt-get update
+        sudo apt-get install -y \
+          openjdk-17-jdk \
+          git \
+          zip \
+          unzip \
+          libncurses5
+
+    - name: Install Android SDK command-line tools
+      run: |
+        mkdir -p $HOME/android-sdk/cmdline-tools
+        cd $HOME/android-sdk/cmdline-tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-*.zip
+        mv cmdline-tools latest
+        cd latest/bin
+        echo "export ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "export PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+
+    - name: Accept Android licenses
+      run: |
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+    - name: Install BEEM and build dependencies
+      run: |
+        pip install --upgrade pip
+        # Install BEEM and Kivy for Android building
+        pip install beem buildozer
+        # Install development version of Cython (required for Kivy on Android)
+        pip install Cython==0.29.36
+
+    - name: Initialize and build with BEEM
+      run: |
+        # Initialize BEEM project
         beem init --name "MyApp" --version "1.0.0" --package "com.example.myapp"
         
-        # Добавление зависимостей
+        # Add Python and Kivy
         beem add python==3.11
         beem add kivy==2.3.0
         
-        # Добавление дополнительных зависимостей (если есть requirements.txt)
-        if [ -f "requirements.txt" ]; then
-          while read pkg; do
-            beem add "$pkg"
-          done < requirements.txt
-        fi
-        
-        # Копирование исходного кода
+        # Copy your source code
         mkdir -p src
-        cp -r *.py src/ || true
-        cp -r main.py src/ || true
+        # Copy main Python files; adjust pattern as needed for your project
+        cp *.py src/ 2>/dev/null || true
         
-        # Сборка APK с оптимизацией
+        # Build the APK
         beem build android --optimize --release
-        
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: android-app
         path: dist/*.apk
         retention-days: 7
-        
-    # Опционально: загрузка на GitHub Releases
-    - name: Upload to GitHub Releases
-      if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v1
-      with:
-        files: dist/*.apk
