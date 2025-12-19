@@ -2,7 +2,7 @@ name: Build Wave Defender APK
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -21,5 +21,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: wave-defender-apk
+          name: package
           path: ./bin/*.apk
