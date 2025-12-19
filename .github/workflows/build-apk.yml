@@ -10,36 +10,37 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # 1️⃣ Клонируем репозиторий
       - uses: actions/checkout@v4
 
-      # Настройка Python
+      # 2️⃣ Устанавливаем Python 3.10
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # Установка Java 17
+      # 3️⃣ Устанавливаем Java 17 (для последних SDK)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # Установка необходимых системных зависимостей
+      # 4️⃣ Устанавливаем системные зависимости
       - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install -y python3-pip python3-setuptools python3-wheel \
           git zip unzip build-essential ccache libffi-dev libssl-dev zlib1g-dev \
-          libncurses5 libncurses5-dev wget curl
+          libncurses5 libncurses5-dev wget curl libtinfo5
 
-      # Установка Buildozer и P4A
+      # 5️⃣ Устанавливаем Buildozer и Python-for-Android
       - name: Install Buildozer & Python-for-Android
         run: |
-          pip install --upgrade pip
+          python3 -m pip install --upgrade pip
           pip install buildozer==1.5.0 python-for-android==2023.09.16 cython==0.29.36
 
-      # Настройка Android SDK/NDK вручную
+      # 6️⃣ Настройка Android SDK & NDK
       - name: Setup Android SDK & NDK
         run: |
           mkdir -p $HOME/android-sdk/cmdline-tools
@@ -49,25 +50,26 @@ jobs:
           mv cmdline-tools latest
           export ANDROID_SDK_ROOT=$HOME/android-sdk
           export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
+          
+          # Автоматическое принятие всех лицензий
           yes | sdkmanager --licenses
+          
+          # Установка платформ и build-tools
           sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
 
-      # Собственно сборка APK
+      # 7️⃣ Сборка APK
       - name: Build APK
-        uses: digreatbrian/buildozer-action@v2
-        with:
-          python-version: '3.10'
-          buildozer-cmd: 'buildozer android debug'
+        run: |
+          buildozer android debug
         env:
-          ANDROID_SDK_ROOT: ${{ runner.home }}/android-sdk
-          ANDROID_NDK_ROOT: ${{ runner.home }}/android-ndk
-          ANDROIDSDK: $HOME/.buildozer/android/platform/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+          ANDROID_NDK_ROOT: $HOME/android-sdk/ndk/25.2.9519653
+          ANDROID_HOME: $HOME/android-sdk
           ANDROID_FORCE_ACCEPT_LICENSES: "yes"
-          
-          
-      # Загрузка артефакта
+
+      # 8️⃣ Загрузка артефакта
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: wave-defender-apk
-          path: /home/runner/work/wave-defender/wave-defender/.buildozer/android/platform/build/outputs/apk/debug/wave-defender-debug.apk
+          path: ${{ github.workspace }}/.buildozer/android/platform/build-arm64-v8a/dists/wavedefender/build/outputs/apk/debug/wavedefender-debug.apk
