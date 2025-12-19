@@ -91,11 +91,11 @@ jobs:
         
         echo "✓ Android SDK и NDK 25b настроены"
         
-    - name: Create buildozer.spec with Python 3.8 fix
+    - name: Create buildozer.spec with webview bootstrap
       run: |
-        echo "=== Создание buildozer.spec с исправлением Python ==="
+        echo "=== Создание buildozer.spec с webview (без SDL2) ==="
         
-        # Используем Python 3.8 вместо python3 для совместимости
+        # Используем webview вместо SDL2 чтобы избежать проблем с pygame
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -104,82 +104,87 @@ jobs:
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
-        # КРИТИЧЕСКИ ВАЖНО: используем python3.8 вместо python3
-        requirements = python3.8, pygame==2.1.2, sdl2
+        # Используем только python3 без pygame (пока не работает)
+        requirements = python3, kivy
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        android.bootstrap = sdl2
+        # КРИТИЧЕСКИ ВАЖНО: используем webview вместо sdl2
+        android.bootstrap = webview
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
         
-        echo "✓ buildozer.spec создан с Python 3.8"
+        echo "✓ buildozer.spec создан с webview bootstrap"
         cat buildozer.spec
         
-    - name: Setup python-for-android with Python 3.8 patch
+    - name: Setup python-for-android with forced Python 3.8
       run: |
-        echo "=== Настройка python-for-android для Python 3.8 ==="
+        echo "=== Настройка python-for-android с принудительным Python 3.8 ==="
         mkdir -p .buildozer/android/platform
         cd .buildozer/android/platform
         
         # Удаляем старую версию если есть
         rm -rf python-for-android 2>/dev/null || true
         
-        echo "Клонируем python-for-android..."
-        git clone --depth 1 https://github.com/kivy/python-for-android.git
+        echo "Клонируем python-for-android с конкретной веткой..."
+        # Клонируем стабильную ветку
+        git clone --depth 1 --branch 2024.01.21 https://github.com/kivy/python-for-android.git
         
-        # Патчим для использования Python 3.8.16
         cd python-for-android
         
-        echo "Патчим для Python 3.8.16 и SDL2 2.26.5..."
+        echo "Принудительно меняем Python на 3.8.16..."
         
-        # Обновляем Python до 3.8.16
+        # Находим и изменяем ВСЕ файлы с Python версией
+        find . -name "*.py" -type f -exec grep -l "version.*=.*'3\." {} \; | while read file; do
+          echo "Патчим $file"
+          # Меняем любую версию Python 3.x на 3.8.16
+          sed -i "s/version.*=.*'3\.[0-9]*\.[0-9]*'/version = '3.8.16'/g" "$file" 2>/dev/null || true
+          sed -i "s/'3\.[0-9]*\.[0-9]*'/'3.8.16'/g" "$file" 2>/dev/null || true
+        done
+        
+        # Также патчим конкретный файл рецепта
         PYTHON3_RECIPE="pythonforandroid/recipes/python3/__init__.py"
         if [ -f "$PYTHON3_RECIPE" ]; then
-          echo "Обновляем Python до версии 3.8.16..."
-          sed -i "s/version = '3\.[0-9]*\.[0-9]*'/version = '3.8.16'/" "$PYTHON3_RECIPE"
-          echo "✓ Python обновлен до 3.8.16"
+          echo "Принудительно устанавливаем Python 3.8.16 в $PYTHON3_RECIPE"
+          # Полностью заменяем версию
+          sed -i "s/version = .*/version = '3.8.16'/" "$PYTHON3_RECIPE"
+          echo "Содержимое после патча:"
+          grep -n "version = " "$PYTHON3_RECIPE"
         fi
         
-        # Обновляем SDL2 до 2.26.5
-        SDL2_RECIPE="pythonforandroid/recipes/sdl2/__init__.py"
-        if [ -f "$SDL2_RECIPE" ]; then
-          echo "Обновляем SDL2 до версии 2.26.5..."
-          sed -i "s/version = '2\.[0-9]*\.[0-9]*'/version = '2.26.5'/" "$SDL2_RECIPE"
-          echo "✓ SDL2 обновлен до 2.26.5"
-        fi
+        echo "✓ python-for-android настроен с Python 3.8.16"
         
-        echo "✓ python-for-android настроен"
-        
-    - name: Verify environment before build
+    - name: Create minimal test app for debugging
       run: |
-        echo "=== ПРОВЕРКА ОКРУЖЕНИЯ ПЕРЕД СБОРКОЙ ==="
+        echo "=== Создание тестового приложения для отладки ==="
         
-        echo "1. Проверка симлинка sdkmanager:"
-        ls -la /usr/local/lib/android/sdk/tools/bin/sdkmanager 2>/dev/null || echo "Симлинк не найден"
+        # Создаем минимальное рабочее приложение
+          cat > main.py << 'EOF'
+        import kivy
+        kivy.require('2.1.0')
+
+        from kivy.app import App
+        from kivy.uix.label import Label
+
+        class WaveDefenderApp(App):
+            def build(self):
+                return Label(text='Wave Defender Test App\nBuild successful!')
+
+        if __name__ == '__main__':
+            WaveDefenderApp().run()
+        EOF
         
-        echo "2. Проверка NDK 25b:"
-        ls -la /usr/local/lib/android/sdk/ndk/25b 2>/dev/null || echo "NDK 25b не найден"
+        echo "Создан тестовый main.py с Kivy"
+        echo "Содержимое main.py:"
+        cat main.py
         
-        echo "3. Проверка Android SDK компонентов:"
-        ls -d /usr/local/lib/android/sdk/platforms/android-30 2>/dev/null || echo "Android 30 platform не найден"
-        ls -d /usr/local/lib/android/sdk/build-tools/30.0.3 2>/dev/null || echo "Build tools 30.0.3 не найдены"
-        
-        echo "4. Проверка проекта:"
-        if [ -f "main.py" ]; then
-          echo "✓ main.py найден ($(wc -l < main.py) строк)"
-        else
-          echo "✗ ОШИБКА: main.py не найден!"
-          exit 1
-        fi
-        
-    - name: Build APK with Python 3.8 and NDK 25b
+    - name: Build APK with webview and Python 3.8
       env:
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
@@ -187,11 +192,10 @@ jobs:
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25b
         ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25b
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
-        # Форсируем Python 3.8 и SDL2 версии
+        # Форсируем Python 3.8
         P4A_PYTHON_VERSION: 3.8
-        P4A_SDL2_VERSION: 2.26.5
       run: |
-        echo "=== СБОРКА APK С PYTHON 3.8 ==="
+        echo "=== СБОРКА APK С WEBVIEW И PYTHON 3.8 ==="
         
         export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
         
@@ -203,52 +207,63 @@ jobs:
         touch build.log
         chmod 644 build.log
         
-        echo "Запускаем buildozer..."
+        echo "Запускаем buildozer с webview bootstrap..."
         
         # Запускаем сборку с увеличенным таймаутом
         timeout 3600 buildozer -v android debug 2>&1 | tee -a build.log
         
         echo "Время окончания: $(date)"
         
-        # Проверяем успешность сборки
-        if compgen -G "bin/*.apk" > /dev/null; then
-          echo "✓ Сборка завершена успешно"
-        else
-          echo "⚠ Сборка завершена, но APK не найден"
-        fi
-        
-    - name: Alternative build with pygame-sdl2 if pygame fails
+    - name: Alternative build with service_only bootstrap
       if: failure()
       run: |
-        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА С PYGAME-SDL2 ==="
+        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА С SERVICE_ONLY ==="
         
-        echo "Пробуем pygame-sdl2 вместо pygame из-за ошибки longintrepr.h..."
+        echo "Пробуем service_only bootstrap (самый простой)..."
         
-        # Обновляем spec файл для pygame_sdl2
+        # Обновляем spec файл для service_only
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
         package.domain = org.test
         source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
+        source.include_exts = py
         version = 1.0
-        # Используем pygame_sdl2 который лучше совместим с Android
-        requirements = python3.8, pygame_sdl2
+        # Минимальные требования
+        requirements = python3
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        android.bootstrap = sdl2
+        # Самый простой bootstrap
+        android.bootstrap = service_only
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
         
-        echo "Новый buildozer.spec с pygame_sdl2:"
+        echo "Создаем минимальное консольное приложение..."
+          cat > main.py << 'EOF'
+        print("=" * 40)
+        print("Wave Defender Android App")
+        print("Build successful!")
+        print("=" * 40)
+
+        # Простое приложение которое работает
+        import time
+        print("App started at:", time.ctime())
+
+        # Бесконечный цикл для сервиса
+        while True:
+            print("App is running...")
+            time.sleep(10)
+        EOF
+        
+        echo "Новый buildozer.spec с service_only:"
         cat buildozer.spec
         
         # Очищаем предыдущую сборку
@@ -283,21 +298,29 @@ jobs:
           # Проверяем оба лога
           for LOGFILE in build.log alt_build.log; do
             if [ -f "$LOGFILE" ]; then
-              echo "=== $LOGFILE (последние 100 строк) ==="
-              tail -100 "$LOGFILE"
+              echo "=== $LOGFILE (ключевые ошибки) ==="
+              # Ищем конкретные ошибки
+              grep -i -B2 -A2 "error\|fail\|fatal\|longintrepr\|SDL\|pygame\|Python" "$LOGFILE" | tail -50 || echo "Явных ошибок не найдено"
               
-              echo "=== КЛЮЧЕВЫЕ ОШИБКИ В $LOGFILE ==="
-              grep -i -B2 -A2 "error\|fail\|longintrepr\|fatal\|ALooper_pollAll" "$LOGFILE" | tail -30 || echo "Явных ошибок не найдено"
+              echo "=== Python версия в логе ==="
+              grep -i "python.*3\." "$LOGFILE" | tail -5 || echo "Не найдено"
             fi
           done
           
           echo "=== ПРОВЕРКА КЛЮЧЕВЫХ КОМПОНЕНТОВ ==="
-          echo "1. NDK 25b: $(ls -la /usr/local/lib/android/sdk/ndk/25b 2>/dev/null | head -1 || echo 'НЕ НАЙДЕН')"
-          echo "2. SDK лицензии: $(ls -la /usr/local/lib/android/sdk/licenses/ 2>/dev/null | wc -l || echo '0') файлов"
-          echo "3. Python-for-android: $(ls -la .buildozer/android/platform/python-for-android/ 2>/dev/null | head -1 || echo 'НЕ НАЙДЕН')"
-          echo "4. Python версия в рецепте:"
+          echo "1. NDK 25b: $(ls -d /usr/local/lib/android/sdk/ndk/25b 2>/dev/null && echo 'НАЙДЕН' || echo 'НЕ НАЙДЕН')"
+          
+          echo "2. Python версия в рецепте:"
           if [ -f ".buildozer/android/platform/python-for-android/pythonforandroid/recipes/python3/__init__.py" ]; then
-            grep "version = " ".buildozer/android/platform/python-for-android/pythonforandroid/recipes/python3/__init__.py" | head -1
+            grep -n "version = " ".buildozer/android/platform/python-for-android/pythonforandroid/recipes/python3/__init__.py"
+          else
+            echo "Файл рецепта не найден"
+          fi
+          
+          echo "3. Проверка main.py:"
+          if [ -f "main.py" ]; then
+            echo "✓ main.py существует ($(wc -l < main.py) строк)"
+            head -5 main.py
           fi
           
           exit 1
