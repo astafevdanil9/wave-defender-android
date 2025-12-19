@@ -5,8 +5,8 @@ package.domain = com.astafevdanil9
 source.dir = .
 source.main = main.py
 version = 1.0.0
-requirements = python3, pygame, sdl2_ttf
-orientation = landscape
+requirements = python3==3.11, kivy==2.3.0, pygame, sdl2_ttf
+orientation = portrait
 fullscreen = 1
 android.archs = arm64-v8a
 android.permissions = INTERNET, VIBRATE

@@ -1,7 +1,13 @@
 # .github/workflows/android.yml
-name: Modern Android Build
+name: Modern Android Build with BEEM
 
-on: [push]
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [published]
 
 jobs:
   build:
@@ -10,17 +16,45 @@ jobs:
       image: ghcr.io/kivy/beem-builder:latest
       
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     
-    - name: Build with BEEM
+    - name: Build APK with BEEM
       run: |
-        # Всё предустановлено в контейнере
-        beem init
+        # Инициализация проекта
+        beem init --name "MyApp" --version "1.0.0" --package "com.example.myapp"
+        
+        # Добавление зависимостей
         beem add python==3.11
         beem add kivy==2.3.0
-        beem build android --optimize
         
-    - uses: actions/upload-artifact@v4
+        # Добавление дополнительных зависимостей (если есть requirements.txt)
+        if [ -f "requirements.txt" ]; then
+          while read pkg; do
+            beem add "$pkg"
+          done < requirements.txt
+        fi
+        
+        # Копирование исходного кода
+        mkdir -p src
+        cp -r *.py src/ || true
+        cp -r main.py src/ || true
+        
+        # Сборка APK с оптимизацией
+        beem build android --optimize --release
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: app-release
+        name: android-app
         path: dist/*.apk
+        retention-days: 7
+        
+    # Опционально: загрузка на GitHub Releases
+    - name: Upload to GitHub Releases
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*.apk
