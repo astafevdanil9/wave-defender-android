@@ -94,10 +94,12 @@ jobs:
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
-        # КРИТИЧЕСКИ ВАЖНО: отключаем авто-обновление SDK
-        android.skip_update = true
+        # ВАЖНО: оставляем true чтобы Buildozer не пытался обновлять
+        android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
+        # Явно указываем путь к sdkmanager для Buildozer
+        android.sdkmanager = /usr/local/lib/android/sdk/tools/bin/sdkmanager
 
         [buildozer]
         log_level = 2
@@ -109,6 +111,7 @@ jobs:
         EOF
         
         echo "✓ buildozer.spec создан с переопределением sdkmanager"
+        cat buildozer.spec
         
     - name: Patch Buildozer to use correct sdkmanager
       run: |
