@@ -1,20 +1,26 @@
-name: Build Android APK with BEEM
+# .github/workflows/android.yml
+name: Modern Android Build
 
 on: [push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/kivy/beem-builder:latest
+      
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup BEEM
+    - name: Build with BEEM
       run: |
-        pip install beem-build
-        # BEEM автоматически устанавливает всё необходимое
+        # Всё предустановлено в контейнере
         beem init
+        beem add python==3.11
+        beem add kivy==2.3.0
+        beem build android --optimize
         
-    - name: Build APK
-      run: |
-        # Простая команда - BEEM сам всё настраивает
-        beem build android --output app.apk
+    - uses: actions/upload-artifact@v4
+      with:
+        name: app-release
+        path: dist/*.apk
