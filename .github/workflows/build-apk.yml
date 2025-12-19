@@ -1,4 +1,4 @@
-name: Build Wave Defender APK
+name: Build APK
 
 on:
   push:
@@ -7,88 +7,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3-pip python3-setuptools python3-wheel git zip unzip openjdk-17-jdk build-essential ccache libffi-dev libssl-dev zlib1g-dev
-
-      - name: Set Android env
-        run: |
-          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_FORCE_ACCEPT_LICENSES=YES" >> $GITHUB_ENV
-          echo "ANDROIDAPI=33" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-
-      - name: Cache Android SDK & NDK
-        uses: actions/cache@v3
-        with:
-          path: |
-            $HOME/android-sdk
-            $HOME/.buildozer/android/platform/android-ndk-r25b
-          key: ${{ runner.os }}-android-sdk-ndk
-          restore-keys: |
-            ${{ runner.os }}-android-sdk-ndk
-
-      - name: Install Android SDK
-        run: |
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          cd $ANDROID_SDK_ROOT/cmdline-tools
-          if [ ! -d latest ]; then
-            wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-            unzip commandlinetools-linux-11076708_latest.zip
-            mv cmdline-tools latest
-          fi
-
-      - name: Accept licenses for global SDK
-        run: yes | sdkmanager --licenses
-
-      - name: Install SDK packages (API 33)
-        run: |
-          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-      - name: Install Buildozer & P4A pinned
-        run: |
-          pip3 install --upgrade pip
-          pip3 install buildozer==1.5.0 python-for-android==2023.09.16 cython==0.29.36
-
-      - name: Remove old Buildozer SDK
-        run: rm -rf ~/.buildozer/android || true
-
-      - name: Create Buildozer internal SDK licenses
-        run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-preview-license
-
-      - name: Fix internal SDK tools (sdkmanager & avdmanager)
-        run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk/tools
-          ln -s $HOME/android-sdk/cmdline-tools/latest ~/.buildozer/android/platform/android-sdk/tools/cmdline-tools
-          mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
-          ln -s $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
-          ln -s $HOME/android-sdk/cmdline-tools/latest/bin/avdmanager ~/.buildozer/android/platform/android-sdk/tools/bin/avdmanager || true
-
+      # 1) Простой вариант с готовым buildozer‑action
       - name: Build APK
-        run: |
-          export PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH
-          buildozer android clean || true
-          buildozer android debug --sdk_path $HOME/android-sdk --ignore-licenses
+        uses: ArtemSBulgakov/buildozer-action@v1
+        with:
+          # тут можно указать команду сборки
+          command: buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: wave-defender-apk
-          path: bin/*.apk
+          name: apk
+          path: ./bin/*.apk
