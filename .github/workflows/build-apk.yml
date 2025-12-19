@@ -42,7 +42,7 @@ jobs:
           wget
           
         pip3 install --upgrade pip wheel setuptools
-        pip3 install buildozer cython
+        pip3 install buildozer==1.5.0 cython==0.29.36 kivy==2.1.0
         
     - name: Setup Android SDK with NDK 25b
       run: |
@@ -123,51 +123,53 @@ jobs:
         echo "✓ buildozer.spec создан с SDL2 + Kivy"
         cat buildozer.spec
         
-    - name: Patch python-for-android recipe for Python 3.9
+    - name: Pre-configure python-for-android
       run: |
-        echo "=== Настройка python-for-android ==="
+        echo "Setting up environment for Python 3.9..."
         
-        # Даем Buildozer скачать свою версию
-        echo "Buildozer скачает нужную версию python-for-android"
-        
-        # Но мы можем предварительно скачать и патчить
+        # Создаем директорию для python-for-android
         mkdir -p .buildozer/android/platform
+        
+        # Если хотим использовать конкретную версию
         cd .buildozer/android/platform
+        git clone --depth 1 https://github.com/kivy/python-for-android.git || echo "Already exists"
         
-        # Клонируем master
-        git clone --depth 1 https://github.com/kivy/python-for-android.git || echo "Уже существует"
-        
-        # Попробуем установить Python 3.9 если нужно
+        # Настраиваем Python 3.9 в рецептах
         cd python-for-android 2>/dev/null || exit 0
         
-        echo "Текущая версия Python в рецептах:"
-        find . -name "*.py" -exec grep -l "version.*=.*'3\." {} \; | head -3 | xargs grep -h "version = " || true
+        # Патчим для Python 3.9
+        PYTHON_RECIPE="pythonforandroid/recipes/python3/__init__.py"
+        if [ -f "$PYTHON_RECIPE" ]; then
+          echo "Setting Python to 3.9.18..."
+          sed -i "s/version = '3\.[0-9]*\.[0-9]*'/version = '3.9.18'/" "$PYTHON_RECIPE"
+          grep "version = " "$PYTHON_RECIPE"
+        fi
         
-    - name: Build APK with simple requirements
+    - name: Build with Python 3.9 configuration
       env:
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25b
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25b
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
-        # Убираем P4A_PYTHON_VERSION чтобы не мешать
+        # КРИТИЧЕСКИ ВАЖНО: форсируем Python 3.9
+        P4A_PYTHON_VERSION: 3.9
+        P4A_SDL2_VERSION: 2.26.5
       run: |
-        echo "=== СБОРКА APK С ПРОСТЫМИ ТРЕБОВАНИЯМИ ==="
+        echo "=== BUILDING WITH PYTHON 3.9 ==="
         
-        export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
+        # Проверка окружения
+        echo "Android NDK: $ANDROID_NDK_HOME"
+        echo "Python version forced: $P4A_PYTHON_VERSION"
         
-        echo "Время начала: $(date)"
-        
-        # Создаем файл лога
+        # Создаем лог файл
         touch build.log
         chmod 644 build.log
         
-        echo "Запускаем сборку..."
+        echo "Starting build at: $(date)"
         
-        # Запускаем сборку
-        timeout 3600 buildozer -v android debug 2>&1 | tee -a build.log
+        # Пробуем сборку с увеличенным временем
+        timeout 4200 buildozer -v android debug 2>&1 | tee -a build.log
         
-        echo "Время окончания: $(date)"
+        echo "Build finished at: $(date)"
         
     - name: Alternative build with minimal requirements
       if: failure()
