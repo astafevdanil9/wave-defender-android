@@ -1,8 +1,8 @@
-name: Build APK
+name: Build Wave Defender APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   workflow_dispatch:
 
 jobs:
@@ -12,14 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1) Простой вариант с готовым buildozer‑action
-      - name: Build APK in Docker
-        run: |
-          docker run --rm -v $GITHUB_WORKSPACE:/app pythonforandroid/python-for-android \
-          sh -c "cd /app && buildozer android debug"
+      - name: Build APK
+        uses: digreatbrian/buildozer-action@v2
+        with:
+          python-version: 3.10
+          buildozer-cmd: buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk
+          name: wave-defender-apk
           path: ./bin/*.apk
