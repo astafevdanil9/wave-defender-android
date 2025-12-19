@@ -63,10 +63,7 @@ jobs:
       - name: Install buildozer (pinned)
         run: |
           pip3 install --upgrade pip
-          pip3 install \
-            cython==0.29.36 \
-            buildozer==1.5.0 \
-            python-for-android==2023.09.16
+          pip3 install buildozer==1.5.0 python-for-android==2023.09.16 cython==0.29.36
 
       - name: Remove old buildozer SDK
         run: |
