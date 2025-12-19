@@ -13,10 +13,12 @@ jobs:
 
     - name: Clean previous builds
       run: |
+        echo "=== Очистка предыдущих сборок ==="
         rm -rf .buildozer ~/.buildozer bin
         
     - name: Setup environment
       run: |
+        echo "=== Установка зависимостей ==="
         sudo apt update
         sudo apt install -y \
           python3 \
@@ -42,56 +44,58 @@ jobs:
         pip3 install --upgrade pip wheel setuptools
         pip3 install buildozer cython pygame==2.1.2
         
-    - name: Setup Android SDK with modern tools (КРИТИЧЕСКИ ВАЖНО)
+    - name: Setup Android SDK with NDK 25b
       run: |
+        echo "=== Настройка Android SDK и NDK 25b ==="
+        
         # Устанавливаем переменные окружения
         export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
-        
-        # УДАЛЯЕМ старые tools которые вызывают ошибку
-        echo "=== УДАЛЯЕМ старые инструменты tools/ ==="
-        rm -rf $ANDROID_SDK_ROOT/tools 2>/dev/null || true
-        
-        # Используем ТОЛЬКО современные cmdline-tools
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
-        echo "=== 3. Создаем симлинк для совместимости ==="
-        # КРИТИЧЕСКИ ВАЖНО: создаем директорию tools/bin и симлинк
+        # Удаляем старые tools которые вызывают ошибку
+        echo "1. Удаляем старые инструменты tools/..."
+        rm -rf $ANDROID_SDK_ROOT/tools 2>/dev/null || true
+        
+        # Создаем симлинк для совместимости
+        echo "2. Создаем симлинк для совместимости..."
         mkdir -p $ANDROID_SDK_ROOT/tools/bin
         ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $ANDROID_SDK_ROOT/tools/bin/sdkmanager
         
         echo "Проверяем симлинк:"
         ls -la $ANDROID_SDK_ROOT/tools/bin/sdkmanager
-        echo "Реальный путь:"
-        readlink -f $ANDROID_SDK_ROOT/tools/bin/sdkmanager || echo "Не симлинк"
-
-        echo "=== Принимаем лицензии ==="
-        # Создаем файлы лицензий вручную (гарантированно работает)
+        
+        # Принимаем лицензии
+        echo "3. Принимаем лицензии..."
         mkdir -p $ANDROID_SDK_ROOT/licenses
-          cat > $ANDROID_SDK_ROOT/licenses/android-sdk-license << 'EOF'
-        8933bad161af4178b1185d1a37fbf41ea5269c55
-        d56f5187479451eabf01fb78af6dfcb131a6481e
-        24333f8a63b6825ea9c5514f83c2829b004d1fee
-        84831b9409646a918e30573b4ad6cb1653d37abb
-        33b6a2b64607f11b759f320ef9dff4ae5c47d97a
-        79120722343a6f314e0719f863036c702b0e6b2a
-        e9acab5b5fbb560a72cfaecce8946896ff6aab9d
-        85b5a0da6d1e23e8f42d5a1e0c75470e6493b7c7
-        EOF
+        echo -e "8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n84831b9409646a918e30573b4ad6cb1653d37abb" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
         
-        # Принимаем лицензии через современные инструменты
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -10 || true
+        # Принимаем лицензии через sdkmanager
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -5 || true
         
-        echo "=== Устанавливаем компоненты через cmdline-tools ==="
+        # Устанавливаем компоненты Android
+        echo "4. Устанавливаем компоненты Android..."
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
         
-        echo "✓ Android SDK настроен с использованием cmdline-tools"
+        # Устанавливаем NDK 25b для совместимости с SDL2
+        echo "5. Устанавливаем NDK 25b (совместимый с SDL2)..."
+        mkdir -p /tmp/ndk
+        cd /tmp/ndk
         
-    - name: Create buildozer.spec that forces cmdline-tools
+        # Скачиваем NDK 25b
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        mv android-ndk-r25b /usr/local/lib/android/sdk/ndk/25b
+        
+        echo "✓ Android SDK и NDK 25b настроены"
+        
+    - name: Create buildozer.spec with SDL2 fix
       run: |
-        # Создаем spec с ЯВНЫМ отключением старого sdkmanager
+        echo "=== Создание buildozer.spec с исправлением SDL2 ==="
+        
+        # Создаем spec с использованием NDK 25b
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -100,146 +104,186 @@ jobs:
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
-        requirements = python3, pygame==2.1.2
+        requirements = python3, pygame==2.1.2, sdl2
         android.api = 30
         android.minapi = 21
         android.archs = armeabi-v7a
-        # ВАЖНО: оставляем true чтобы Buildozer не пытался обновлять
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
-        android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
-        # Явно указываем путь к sdkmanager для Buildozer
-        android.sdkmanager = /usr/local/lib/android/sdk/tools/bin/sdkmanager
+        android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
+        android.bootstrap = sdl2
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
-
-        # ПЕРЕОПРЕДЕЛЯЕМ команды sdkmanager
-        [app:source]
-        android.sdkmanager_cmd = /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
         EOF
         
-        echo "✓ buildozer.spec создан с переопределением sdkmanager"
+        echo "✓ buildozer.spec создан"
         cat buildozer.spec
         
-    - name: Patch Buildozer to use correct sdkmanager
+    - name: Setup python-for-android with SDL2 patch
       run: |
-        # Патчим buildozer чтобы он использовал правильный путь
-        echo "=== Патчим buildozer ==="
-        
-        # Находим файл android.py в buildozer
-        BUILDOCER_ANDROID_PY=$(python3 -c "import buildozer.targets.android as a; print(a.__file__)" 2>/dev/null || echo "")
-        
-        if [ -f "$BUILDOCER_ANDROID_PY" ]; then
-          echo "Найден файл buildozer android: $BUILDOCER_ANDROID_PY"
-          # Делаем backup
-          cp "$BUILDOCER_ANDROID_PY" "${BUILDOCER_ANDROID_PY}.backup"
-        fi
-        
-        # Альтернативно создаем wrapper скрипт
-          cat > /tmp/use_cmdline_sdkmanager.sh << 'EOF'
-        #!/bin/bash
-        # Форсируем использование cmdline-tools вместо старых tools
-        export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-        export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
-        exec /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "$@"
-        EOF
-        
-        chmod +x /tmp/use_cmdline_sdkmanager.sh
-        
-    - name: Setup python-for-android
-      run: |
+        echo "=== Настройка python-for-android с патчем SDL2 ==="
         mkdir -p .buildozer/android/platform
         cd .buildozer/android/platform
         
         # Удаляем старую версию если есть
-        rm -rf python-for-android
+        rm -rf python-for-android 2>/dev/null || true
         
-        echo "=== Клонируем python-for-android ==="
+        echo "Клонируем python-for-android..."
         git clone --depth 1 https://github.com/kivy/python-for-android.git
         
-        echo "✓ python-for-android успешно скачан"
+        # Патчим SDL2 рецепт для использования новой версии
+        cd python-for-android
         
-    - name: Build APK
+        # Обновляем версию SDL2 до 2.26.5
+        SDL2_RECIPE="pythonforandroid/recipes/sdl2/__init__.py"
+        if [ -f "$SDL2_RECIPE" ]; then
+          echo "Обновляем SDL2 до версии 2.26.5..."
+          sed -i "s/version = '2\.0\.[0-9]*'/version = '2.26.5'/" "$SDL2_RECIPE"
+          sed -i "s/version = '2\.26\.[0-9]*'/version = '2.26.5'/" "$SDL2_RECIPE"
+          echo "✓ SDL2 обновлен до 2.26.5"
+        else
+          echo "⚠ Файл рецепта SDL2 не найден"
+        fi
+        
+        echo "✓ python-for-android настроен"
+        
+    - name: Verify environment before build
+      run: |
+        echo "=== ПРОВЕРКА ОКРУЖЕНИЯ ПЕРЕД СБОРКОЙ ==="
+        
+        echo "1. Проверка симлинка sdkmanager:"
+        ls -la /usr/local/lib/android/sdk/tools/bin/sdkmanager 2>/dev/null || echo "Симлинк не найден"
+        
+        echo "2. Проверка NDK 25b:"
+        ls -la /usr/local/lib/android/sdk/ndk/25b 2>/dev/null || echo "NDK 25b не найден"
+        
+        echo "3. Проверка Android SDK компонентов:"
+        ls -d /usr/local/lib/android/sdk/platforms/android-30 2>/dev/null || echo "Android 30 platform не найден"
+        ls -d /usr/local/lib/android/sdk/build-tools/30.0.3 2>/dev/null || echo "Build tools 30.0.3 не найдены"
+        
+        echo "4. Проверка проекта:"
+        if [ -f "main.py" ]; then
+          echo "✓ main.py найден"
+        else
+          echo "✗ ОШИБКА: main.py не найден!"
+          exit 1
+        fi
+        
+    - name: Build APK with NDK 25b
       env:
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+        # КРИТИЧЕСКИ ВАЖНО: используем NDK 25b
+        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25b
+        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25b
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
+        # Переменные для SDL2
+        P4A_SDL2_VERSION: 2.26.5
       run: |
         echo "=== НАЧАЛО СБОРКИ APK ==="
         
         # Устанавливаем правильные пути
         export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
         
-        echo "Проверка окружения:"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "JAVA_HOME: $JAVA_HOME"
-        which java
-        java -version
-        
+        echo "Используемый NDK: $ANDROID_NDK_HOME"
         echo "Время начала: $(date)"
         
-        # Запускаем buildozer с подробным логированием
-        echo "Запускаем buildozer android debug..."
-        
-        # СОЗДАЕМ ФАЙЛ ЛОГА ГАРАНТИРОВАННО
+        # Создаем файл лога
         touch build.log
         chmod 644 build.log
         
-        # Запускаем сборку с записью в файл и выводом в консоль
-        timeout 1800 buildozer -v android debug 2>&1 | tee -a build.log
+        echo "Запускаем buildozer с NDK 25b..."
+        
+        # Запускаем сборку с таймаутом 45 минут
+        timeout 2700 buildozer -v android debug 2>&1 | tee -a build.log
         
         echo "Время окончания: $(date)"
-        echo "✓ Сборка завершена"
         
-    - name: Check build result
+        # Проверяем успешность сборки
+        if compgen -G "bin/*.apk" > /dev/null; then
+          echo "✓ Сборка завершена успешно"
+        else
+          echo "⚠ Сборка завершена, но APK не найден"
+        fi
+        
+    - name: Alternative build with webview if SDL2 fails
+      if: failure()
       run: |
-        echo "=== ПРОВЕРКА РЕЗУЛЬТАТА СБОРКИ ==="
+        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА С WEBVIEW ==="
         
-        # Проверяем наличие APK
-        if ls bin/*.apk 1> /dev/null 2>&1; then
+        echo "SDL2 не сработал, пробуем webview bootstrap..."
+        
+        # Обновляем spec файл для webview
+          cat > buildozer.spec << 'EOF'
+        [app]
+        title = Wave Defender
+        package.name = wavedefender
+        package.domain = org.test
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
+        version = 1.0
+        requirements = python3, pygame==2.1.2, android
+        android.api = 30
+        android.minapi = 21
+        android.archs = armeabi-v7a
+        android.accept_sdk_license = true
+        android.sdk_path = /usr/local/lib/android/sdk
+        android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
+        android.bootstrap = webview
+
+        [buildozer]
+        log_level = 2
+        warn_on_root = 0
+        EOF
+        
+        echo "Новый buildozer.spec:"
+        cat buildozer.spec
+        
+        # Очищаем предыдущую сборку
+        rm -rf .buildozer/android/platform/build-armeabi-v7a
+        
+        # Запускаем альтернативную сборку
+        touch alt_build.log
+        timeout 2700 buildozer -v android debug 2>&1 | tee -a alt_build.log
+        
+    - name: Check result and upload
+      run: |
+        echo "=== ПРОВЕРКА РЕЗУЛЬТАТА ==="
+        
+        # Проверяем наличие APK (основной или альтернативной сборки)
+        if compgen -G "bin/*.apk" > /dev/null; then
           APK_FILE=$(ls bin/*.apk | head -1)
           echo "✅ УСПЕХ: APK создан!"
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          echo "Дата создания: $(stat -c %y "$APK_FILE")"
+          echo "Время создания: $(stat -c %y "$APK_FILE")"
+          
+          # Дополнительная информация о APK
+          if [ -f "/usr/local/lib/android/sdk/build-tools/30.0.3/aapt" ]; then
+            echo "Информация о пакете:"
+            /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | \
+              grep -E "package:|launchable-activity:|sdkVersion:" | head -3 || true
+          fi
         else
           echo "❌ ОШИБКА: APK не создан"
           
-          echo "=== ПОИСК ОШИБОК ==="
+          echo "=== ДЕТАЛЬНЫЙ АНАЛИЗ ОШИБОК ==="
           
-          # Проверяем существование лог-файла
-          if [ -f "build.log" ]; then
-            echo "Файл build.log найден, размер: $(du -h build.log | cut -f1)"
-            echo "Последние 100 строк лога:"
-            tail -100 build.log
-            
-            echo "=== ОШИБКИ В ЛОГЕ ==="
-            grep -i "error\|exception\|fail\|traceback" build.log | tail -20 || echo "Явных ошибок не найдено"
-          else
-            echo "⚠ Файл build.log не найден!"
-            
-            # Ищем другие логи
-            echo "Ищем другие логи buildozer..."
-            find . -name "*.log" -type f 2>/dev/null | head -5 | while read logfile; do
-              echo "=== $logfile ==="
-              tail -20 "$logfile"
-            done
-          fi
+          # Проверяем оба лога
+          for LOGFILE in build.log alt_build.log; do
+            if [ -f "$LOGFILE" ]; then
+              echo "=== $LOGFILE ==="
+              echo "Последние ошибки:"
+              grep -i -B3 -A3 "error\|fail\|exception\|ALooper_pollAll" "$LOGFILE" | tail -30 || echo "Явных ошибок не найдено"
+            fi
+          done
           
-          # Проверяем директорию сборки
-          echo "=== ПРОВЕРКА ДИРЕКТОРИЙ ==="
-          if [ -d ".buildozer" ]; then
-            echo "Директория .buildozer существует"
-            ls -la .buildozer/
-          fi
-          
-          if [ -d "bin" ]; then
-            echo "Директория bin существует, содержимое:"
-            ls -la bin/
-          fi
+          echo "=== ПРОВЕРКА КЛЮЧЕВЫХ КОМПОНЕНТОВ ==="
+          echo "1. NDK 25b: $(ls -la /usr/local/lib/android/sdk/ndk/25b 2>/dev/null | head -1 || echo 'НЕ НАЙДЕН')"
+          echo "2. SDK лицензии: $(ls -la /usr/local/lib/android/sdk/licenses/ 2>/dev/null | wc -l || echo '0') файлов"
+          echo "3. Python-for-android: $(ls -la .buildozer/android/platform/python-for-android/ 2>/dev/null | head -1 || echo 'НЕ НАЙДЕН')"
           
           exit 1
         fi
@@ -250,11 +294,12 @@ jobs:
         name: wave-defender-apk
         path: bin/*.apk
         
-    - name: Upload build logs (if failed)
+    - name: Upload logs on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
+        name: build-failure-logs
         path: |
           build.log
-          .buildozer/*.log
+          alt_build.log
+          .buildozer/
