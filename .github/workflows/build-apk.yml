@@ -18,23 +18,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
-            python3-pip \
-            python3-setuptools \
-            python3-wheel \
-            git \
-            zip unzip \
-            openjdk-17-jdk \
-            build-essential \
-            ccache \
-            libffi-dev \
-            libssl-dev \
-            zlib1g-dev
+          sudo apt install -y python3-pip python3-setuptools python3-wheel git zip unzip openjdk-17-jdk build-essential ccache libffi-dev libssl-dev zlib1g-dev
 
-      - name: Set ANDROID env
+      - name: Set Android env
         run: |
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
@@ -50,31 +39,25 @@ jobs:
           mv cmdline-tools latest
 
       - name: Accept licenses
-        run: |
-          yes | sdkmanager --licenses
+        run: yes | sdkmanager --licenses
 
       - name: Install SDK packages
         run: |
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.2"
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-      - name: Install buildozer (pinned)
+      - name: Install Buildozer & P4A pinned
         run: |
           pip3 install --upgrade pip
           pip3 install buildozer==1.5.0 python-for-android==2023.09.16 cython==0.29.36
 
-      - name: Remove old buildozer SDK
-        run: |
-          rm -rf ~/.buildozer/android || true
+      - name: Remove old Buildozer SDK
+        run: rm -rf ~/.buildozer/android || true
 
       - name: Build APK
         run: |
           buildozer android clean || true
-          buildozer android debug \
-            --sdk_path $HOME/android-sdk
-          
+          buildozer android debug --sdk_path $HOME/android-sdk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
