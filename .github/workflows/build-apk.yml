@@ -58,7 +58,13 @@ jobs:
         with:
           python-version: '3.10'
           buildozer-cmd: 'buildozer android debug'
-
+        env:
+          ANDROID_SDK_ROOT: ${{ runner.home }}/android-sdk
+          ANDROID_NDK_ROOT: ${{ runner.home }}/android-ndk
+          ANDROIDSDK: $HOME/.buildozer/android/platform/android-sdk
+          ANDROID_FORCE_ACCEPT_LICENSES: "yes"
+          
+          
       # Загрузка артефакта
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
