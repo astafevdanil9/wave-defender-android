@@ -16,7 +16,7 @@ jobs:
         echo "=== Очистка предыдущих сборок ==="
         rm -rf .buildozer ~/.buildozer bin
         
-    - name: Setup environment
+    - name: Setup environment with Gradle 7.5.1
       run: |
         echo "=== Установка зависимостей ==="
         sudo apt update
@@ -40,7 +40,14 @@ jobs:
           libffi-dev \
           libssl-dev \
           wget
-          
+        
+        # Устанавливаем Gradle 7.5.1 (совместимый с Buildozer)
+        echo "Устанавливаем Gradle 7.5.1..."
+        cd /tmp
+        wget -q https://services.gradle.org/distributions/gradle-7.5.1-bin.zip
+        sudo unzip -d /opt gradle-7.5.1-bin.zip
+        sudo ln -sf /opt/gradle-7.5.1/bin/gradle /usr/local/bin/gradle
+        
         pip3 install --upgrade pip wheel setuptools
         pip3 install buildozer==1.5.0 cython==0.29.36 kivy==2.1.0
         
@@ -75,7 +82,7 @@ jobs:
         
         # Устанавливаем компоненты Android
         echo "4. Устанавливаем компоненты Android..."
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-29"  # API 29 более стабилен
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
         
@@ -91,11 +98,10 @@ jobs:
         
         echo "✓ Android SDK и NDK 25b настроены"
         
-    - name: Create correct buildozer.spec
+    - name: Create buildozer.spec with Gradle settings
       run: |
-        echo "=== Создание правильного buildozer.spec ==="
+        echo "=== Создание buildozer.spec с настройками Gradle ==="
         
-        # Правильная конфигурация: либо SDL2 + Kivy, либо webview без Kivy
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -104,109 +110,130 @@ jobs:
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
-        # ВАРИАНТ 1: SDL2 + Kivy (совместимые)
-        requirements = python3, kivy
-        android.api = 30
+        # Начинаем с чистого Python для теста
+        requirements = python3
+        android.api = 29  # API 29 более совместим
         android.minapi = 21
         android.archs = armeabi-v7a
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        # SDL2 bootstrap для Kivy
-        android.bootstrap = sdl2
+        # Начинаем с service_only - самый простой
+        android.bootstrap = service_only
+        # Отключаем AndroidX для совместимости
+        android.enable_androidx = False
+        android.enable_jetifier = False
+
+        # КРИТИЧЕСКИ ВАЖНО: Настройки Gradle
+        [app:gradle]
+        gradle_version = 7.5.1
+        android_gradle_plugin_version = 4.2.2  # Совместим с Gradle 7.5.1
+
+        # Переменные окружения для Gradle
+        [app:env]
+        GRADLE_OPTS = -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=true
+        P4A_PYTHON_VERSION = 3.9
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
         
-        echo "✓ buildozer.spec создан с SDL2 + Kivy"
+        echo "✓ buildozer.spec создан с настройками Gradle"
         cat buildozer.spec
         
-    - name: Pre-configure python-for-android
+
+    - name: Pre-configure Gradle wrapper
       run: |
-        echo "Setting up environment for Python 3.9..."
+        echo "=== Предварительная настройка Gradle wrapper ==="
         
-        # Создаем директорию для python-for-android
-        mkdir -p .buildozer/android/platform
+        # Создаем правильный gradle wrapper
+        mkdir -p gradle/wrapper
+        cd gradle/wrapper
         
-        # Если хотим использовать конкретную версию
-        cd .buildozer/android/platform
-        git clone --depth 1 https://github.com/kivy/python-for-android.git || echo "Already exists"
+          cat > gradle-wrapper.properties << 'EOF'
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.5.1-bin.zip
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        EOF
         
-        # Настраиваем Python 3.9 в рецептах
-        cd python-for-android 2>/dev/null || exit 0
+        echo "✓ Gradle wrapper настроен на версию 7.5.1"
         
-        # Патчим для Python 3.9
-        PYTHON_RECIPE="pythonforandroid/recipes/python3/__init__.py"
-        if [ -f "$PYTHON_RECIPE" ]; then
-          echo "Setting Python to 3.9.18..."
-          sed -i "s/version = '3\.[0-9]*\.[0-9]*'/version = '3.9.18'/" "$PYTHON_RECIPE"
-          grep "version = " "$PYTHON_RECIPE"
-        fi
-        
-    - name: Build with Python 3.9 configuration
+    - name: Build with Gradle 7.5.1
       env:
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25b
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
-        # КРИТИЧЕСКИ ВАЖНО: форсируем Python 3.9
-        P4A_PYTHON_VERSION: 3.9
-        P4A_SDL2_VERSION: 2.26.5
+        GRADLE_HOME: /opt/gradle-7.5.1
+        GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=true
       run: |
-        echo "=== BUILDING WITH PYTHON 3.9 ==="
+        echo "=== СБОРКА С GRADLE 7.5.1 ==="
         
-        # Проверка окружения
-        echo "Android NDK: $ANDROID_NDK_HOME"
-        echo "Python version forced: $P4A_PYTHON_VERSION"
+        # Проверяем Gradle версию
+        echo "Gradle version:"
+        gradle --version | head -5
         
         # Создаем лог файл
         touch build.log
         chmod 644 build.log
         
-        echo "Starting build at: $(date)"
+        echo "Начало сборки: $(date)"
         
-        # Пробуем сборку с увеличенным временем
+        # Запускаем сборку
         timeout 4200 buildozer -v android debug 2>&1 | tee -a build.log
         
-        echo "Build finished at: $(date)"
+        echo "Окончание сборки: $(date)"
         
-    - name: Alternative build with minimal requirements
-      if: failure()
+    - name: Alternative build with Kivy if basic works
+      if: success()
       run: |
-        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА: МИНИМАЛЬНЫЕ ТРЕБОВАНИЯ ==="
+        echo "=== ПРОБУЕМ С KIVY ==="
         
-        # Самый минимальный spec
+        # Обновляем spec для Kivy
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
         package.name = wavedefender
         package.domain = org.test
         source.dir = .
-        source.include_exts = py
+        source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
-        # МИНИМАЛЬНЫЕ требования - только Python
-        requirements = python3
-        android.api = 30
+        # Теперь пробуем с Kivy
+        requirements = python3, kivy==2.1.0
+        android.api = 29
         android.minapi = 21
         android.archs = armeabi-v7a
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        # service_only - самый простой bootstrap
-        android.bootstrap = service_only
+        android.bootstrap = sdl2
+        android.enable_androidx = False
+        android.enable_jetifier = False
+
+        [app:gradle]
+        gradle_version = 7.5.1
+        android_gradle_plugin_version = 4.2.2
+
+        [app:env]
+        GRADLE_OPTS = -Dorg.gradle.jvmargs=-Xmx2048m
+        P4A_PYTHON_VERSION = 3.9
+        P4A_SDL2_VERSION = 2.26.5
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
         
+        echo "✓ buildozer.spec обновлен для Kivy"
+        cat buildozer.spec
         
-        # Очищаем и перезапускаем
+        echo "Запускаем сборку с Kivy..."
         rm -rf .buildozer/android/platform/build-armeabi-v7a
         
-        touch alt_build.log
-        timeout 3600 buildozer -v android debug 2>&1 | tee -a alt_build.log
+        touch kivy_build.log
+        timeout 4200 buildozer -v android debug 2>&1 | tee -a kivy_build.log
         
     - name: Check result and upload
       run: |
@@ -218,36 +245,29 @@ jobs:
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
           
-          # Проверяем APK
-          echo "Информация об APK:"
-          if command -v file >/dev/null; then
-            file "$APK_FILE"
-          fi
-          ls -la "$APK_FILE"
+          # Дополнительная информация
+          echo "APK информация:"
+          ls -la bin/
           
         else
           echo "❌ ОШИБКА: APK не создан"
           
           echo "=== АНАЛИЗ ОШИБОК ==="
           
-          # Анализируем логи
-          for LOGFILE in build.log alt_build.log; do
+          # Проверяем все логи
+          for LOGFILE in build.log kivy_build.log; do
             if [ -f "$LOGFILE" ]; then
-              echo "=== $LOGFILE (последние 150 строк) ==="
-              tail -150 "$LOGFILE"
-              
-              echo "=== ОШИБКИ В $LOGFILE ==="
-              grep -i "error\|fail\|conflict\|exception" "$LOGFILE" | tail -20 || echo "Нет явных ошибок"
+              echo "=== $LOGFILE (ключевые ошибки) ==="
+              grep -i -B2 -A2 "gradle\|failed\|error\|incompatible\|deprecated" "$LOGFILE" | tail -50 || echo "Явных ошибок не найдено"
             fi
           done
           
-          echo "=== СОВЕТЫ ПО ИСПРАВЛЕНИЮ ==="
-          echo "1. Проблема: Конфликт Kivy и webview"
-          echo "   Решение: Используйте 'sdl2' bootstrap с Kivy"
-          echo "2. Проблема: Python версия"
-          echo "   Решение: Не указывайте P4A_PYTHON_VERSION"
-          echo "3. Проблема: Сложные зависимости"
-          echo "   Решение: Начните с 'python3' только, потом добавляйте"
+          echo "=== РЕШЕНИЯ ДЛЯ GRADLE ==="
+          echo "1. Gradle версия: 7.5.1 (не 9.x)"
+          echo "2. Android Gradle Plugin: 4.2.2"
+          echo "3. Java: 11 (temurin-11-jdk)"
+          echo "4. Android API: 29 (более стабильный)"
+          echo "5. service_only bootstrap для начала"
           
           exit 1
         fi
@@ -262,9 +282,9 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: debug-info
+        name: build-debug-info
         path: |
           build.log
-          alt_build.log
+          kivy_build.log
           buildozer.spec
           main.py
