@@ -34,7 +34,7 @@ jobs:
             libssl-dev \
             zlib1g-dev
 
-      - name: Set ANDROID_SDK_ROOT
+      - name: Set ANDROID env
         run: |
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
@@ -68,18 +68,16 @@ jobs:
             buildozer==1.5.0 \
             python-for-android==2023.09.16
 
-      - name: Remove buildozer SDK
+      - name: Remove old buildozer SDK
         run: |
           rm -rf ~/.buildozer/android || true
 
-      - name: Clean buildozer
-        run: |
-          buildozer android clean || true
-
       - name: Build APK
         run: |
-          buildozer android debug
-
+          buildozer android clean || true
+          buildozer android debug \
+            --sdk_path $HOME/android-sdk
+          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

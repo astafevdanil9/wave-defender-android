@@ -15,6 +15,8 @@ android.permissions = INTERNET, VIBRATE
 [android]
 android.api = 33
 android.build_tools_version = 33.0.2
+android.sdk_path = /home/runner/android-sdk
+android.ndk_path =
 
 [buildozer]
 warn_on_root = 0
