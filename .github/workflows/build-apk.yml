@@ -13,11 +13,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # 1) Простой вариант с готовым buildozer‑action
-      - name: Build APK
-        uses: ArtemSBulgakov/buildozer-action@v1
-        with:
-          # тут можно указать команду сборки
-          command: buildozer android debug
+      - name: Build APK in Docker
+        run: |
+          docker run --rm -v $GITHUB_WORKSPACE:/app pythonforandroid/python-for-android \
+          sh -c "cd /app && buildozer android debug"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
