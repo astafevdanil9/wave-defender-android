@@ -31,18 +31,30 @@ jobs:
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
 
+      - name: Cache Android SDK & NDK
+        uses: actions/cache@v3
+        with:
+          path: |
+            $HOME/android-sdk
+            $HOME/.buildozer/android/platform/android-ndk-r25b
+          key: ${{ runner.os }}-android-sdk-ndk
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-ndk
+
       - name: Install Android SDK
         run: |
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           cd $ANDROID_SDK_ROOT/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip commandlinetools-linux-11076708_latest.zip
-          mv cmdline-tools latest
+          if [ ! -d latest ]; then
+            wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip commandlinetools-linux-11076708_latest.zip
+            mv cmdline-tools latest
+          fi
 
       - name: Accept licenses for global SDK
         run: yes | sdkmanager --licenses
 
-      - name: Install SDK packages
+      - name: Install SDK packages (API 33)
         run: |
           sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
