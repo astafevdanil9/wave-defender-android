@@ -42,7 +42,7 @@ jobs:
           wget
           
         pip3 install --upgrade pip wheel setuptools
-        pip3 install buildozer cython pygame==2.1.2
+        pip3 install buildozer cython
         
     - name: Setup Android SDK with NDK 25b
       run: |
@@ -91,11 +91,11 @@ jobs:
         
         echo "✓ Android SDK и NDK 25b настроены"
         
-    - name: Create buildozer.spec with webview bootstrap
+    - name: Create correct buildozer.spec
       run: |
-        echo "=== Создание buildozer.spec с webview (без SDL2) ==="
+        echo "=== Создание правильного buildozer.spec ==="
         
-        # Используем webview вместо SDL2 чтобы избежать проблем с pygame
+        # Правильная конфигурация: либо SDL2 + Kivy, либо webview без Kivy
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -104,7 +104,7 @@ jobs:
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,wav,ogg,ttf
         version = 1.0
-        # Используем только python3 без pygame (пока не работает)
+        # ВАРИАНТ 1: SDL2 + Kivy (совместимые)
         requirements = python3, kivy
         android.api = 30
         android.minapi = 21
@@ -112,89 +112,69 @@ jobs:
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        # КРИТИЧЕСКИ ВАЖНО: используем webview вместо sdl2
-        android.bootstrap = webview
+        # SDL2 bootstrap для Kivy
+        android.bootstrap = sdl2
 
         [buildozer]
         log_level = 2
         warn_on_root = 0
         EOF
         
-        echo "✓ buildozer.spec создан с webview bootstrap"
+        echo "✓ buildozer.spec создан с SDL2 + Kivy"
         cat buildozer.spec
         
-    - name: Setup python-for-android (без патчей - пусть Buildozer сам управляет)
+    - name: Patch python-for-android recipe for Python 3.9
       run: |
         echo "=== Настройка python-for-android ==="
         
-        # Просто создаем директорию, Buildozer сам скачает нужную версию
+        # Даем Buildozer скачать свою версию
+        echo "Buildozer скачает нужную версию python-for-android"
+        
+        # Но мы можем предварительно скачать и патчить
         mkdir -p .buildozer/android/platform
+        cd .buildozer/android/platform
         
-        echo "Buildozer сам скачает нужную версию python-for-android"
-        echo "Не патчим вручную - это вызывает проблемы"
+        # Клонируем master
+        git clone --depth 1 https://github.com/kivy/python-for-android.git || echo "Уже существует"
         
-    - name: Create minimal test app for debugging
-      run: |
-        echo "=== Создание тестового приложения для отладки ==="
+        # Попробуем установить Python 3.9 если нужно
+        cd python-for-android 2>/dev/null || exit 0
         
-        # Создаем минимальное рабочее приложение
-          cat > main.py << 'EOF'
-        import kivy
-        kivy.require('2.1.0')
-
-        from kivy.app import App
-        from kivy.uix.label import Label
-
-        class WaveDefenderApp(App):
-            def build(self):
-                return Label(text='Wave Defender Test App\nBuild successful!')
-
-        if __name__ == '__main__':
-            WaveDefenderApp().run()
-        EOF
+        echo "Текущая версия Python в рецептах:"
+        find . -name "*.py" -exec grep -l "version.*=.*'3\." {} \; | head -3 | xargs grep -h "version = " || true
         
-        echo "Создан тестовый main.py с Kivy"
-        echo "Содержимое main.py:"
-        cat main.py
-        
-    - name: Build APK with webview and Python 3.8
+    - name: Build APK with simple requirements
       env:
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
-        # Используем NDK 25b
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25b
         ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25b
         JAVA_HOME: /usr/lib/jvm/temurin-11-jdk-amd64
-        # Форсируем Python 3.8
-        P4A_PYTHON_VERSION: 3.8
+        # Убираем P4A_PYTHON_VERSION чтобы не мешать
       run: |
-        echo "=== СБОРКА APK С WEBVIEW И PYTHON 3.8 ==="
+        echo "=== СБОРКА APK С ПРОСТЫМИ ТРЕБОВАНИЯМИ ==="
         
         export PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH
         
-        echo "Используемый Python: $P4A_PYTHON_VERSION"
-        echo "Используемый NDK: $ANDROID_NDK_HOME"
         echo "Время начала: $(date)"
         
         # Создаем файл лога
         touch build.log
         chmod 644 build.log
         
-        echo "Запускаем buildozer с webview bootstrap..."
+        echo "Запускаем сборку..."
         
-        # Запускаем сборку с увеличенным таймаутом
+        # Запускаем сборку
         timeout 3600 buildozer -v android debug 2>&1 | tee -a build.log
         
         echo "Время окончания: $(date)"
         
-    - name: Alternative build with service_only bootstrap
+    - name: Alternative build with minimal requirements
       if: failure()
       run: |
-        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА С SERVICE_ONLY ==="
+        echo "=== АЛЬТЕРНАТИВНАЯ СБОРКА: МИНИМАЛЬНЫЕ ТРЕБОВАНИЯ ==="
         
-        echo "Пробуем service_only bootstrap (самый простой)..."
-        
-        # Обновляем spec файл для service_only
+        # Самый минимальный spec
           cat > buildozer.spec << 'EOF'
         [app]
         title = Wave Defender
@@ -203,7 +183,7 @@ jobs:
         source.dir = .
         source.include_exts = py
         version = 1.0
-        # Минимальные требования
+        # МИНИМАЛЬНЫЕ требования - только Python
         requirements = python3
         android.api = 30
         android.minapi = 21
@@ -211,7 +191,7 @@ jobs:
         android.accept_sdk_license = true
         android.sdk_path = /usr/local/lib/android/sdk
         android.ndk_path = /usr/local/lib/android/sdk/ndk/25b
-        # Самый простой bootstrap
+        # service_only - самый простой bootstrap
         android.bootstrap = service_only
 
         [buildozer]
@@ -219,30 +199,10 @@ jobs:
         warn_on_root = 0
         EOF
         
-        echo "Создаем минимальное консольное приложение..."
-          cat > main.py << 'EOF'
-        print("=" * 40)
-        print("Wave Defender Android App")
-        print("Build successful!")
-        print("=" * 40)
-
-        # Простое приложение которое работает
-        import time
-        print("App started at:", time.ctime())
-
-        # Бесконечный цикл для сервиса
-        while True:
-            print("App is running...")
-            time.sleep(10)
-        EOF
         
-        echo "Новый buildozer.spec с service_only:"
-        cat buildozer.spec
-        
-        # Очищаем предыдущую сборку
+        # Очищаем и перезапускаем
         rm -rf .buildozer/android/platform/build-armeabi-v7a
         
-        # Запускаем альтернативную сборку
         touch alt_build.log
         timeout 3600 buildozer -v android debug 2>&1 | tee -a alt_build.log
         
@@ -255,46 +215,37 @@ jobs:
           echo "✅ УСПЕХ: APK создан!"
           echo "Файл: $APK_FILE"
           echo "Размер: $(du -h "$APK_FILE" | cut -f1)"
-          echo "Время создания: $(stat -c %y "$APK_FILE")"
           
-          # Дополнительная информация о APK
-          if [ -f "/usr/local/lib/android/sdk/build-tools/30.0.3/aapt" ]; then
-            echo "Информация о пакете:"
-            /usr/local/lib/android/sdk/build-tools/30.0.3/aapt dump badging "$APK_FILE" 2>/dev/null | \
-              grep -E "package:|versionName:|sdkVersion:" | head -3 || true
+          # Проверяем APK
+          echo "Информация об APK:"
+          if command -v file >/dev/null; then
+            file "$APK_FILE"
           fi
+          ls -la "$APK_FILE"
+          
         else
           echo "❌ ОШИБКА: APK не создан"
           
-          echo "=== ДЕТАЛЬНЫЙ АНАЛИЗ ОШИБОК ==="
+          echo "=== АНАЛИЗ ОШИБОК ==="
           
-          # Проверяем оба лога
+          # Анализируем логи
           for LOGFILE in build.log alt_build.log; do
             if [ -f "$LOGFILE" ]; then
-              echo "=== $LOGFILE (ключевые ошибки) ==="
-              # Ищем конкретные ошибки
-              grep -i -B2 -A2 "error\|fail\|fatal\|longintrepr\|SDL\|pygame\|Python" "$LOGFILE" | tail -50 || echo "Явных ошибок не найдено"
+              echo "=== $LOGFILE (последние 150 строк) ==="
+              tail -150 "$LOGFILE"
               
-              echo "=== Python версия в логе ==="
-              grep -i "python.*3\." "$LOGFILE" | tail -5 || echo "Не найдено"
+              echo "=== ОШИБКИ В $LOGFILE ==="
+              grep -i "error\|fail\|conflict\|exception" "$LOGFILE" | tail -20 || echo "Нет явных ошибок"
             fi
           done
           
-          echo "=== ПРОВЕРКА КЛЮЧЕВЫХ КОМПОНЕНТОВ ==="
-          echo "1. NDK 25b: $(ls -d /usr/local/lib/android/sdk/ndk/25b 2>/dev/null && echo 'НАЙДЕН' || echo 'НЕ НАЙДЕН')"
-          
-          echo "2. Python версия в рецепте:"
-          if [ -f ".buildozer/android/platform/python-for-android/pythonforandroid/recipes/python3/__init__.py" ]; then
-            grep -n "version = " ".buildozer/android/platform/python-for-android/pythonforandroid/recipes/python3/__init__.py"
-          else
-            echo "Файл рецепта не найден"
-          fi
-          
-          echo "3. Проверка main.py:"
-          if [ -f "main.py" ]; then
-            echo "✓ main.py существует ($(wc -l < main.py) строк)"
-            head -5 main.py
-          fi
+          echo "=== СОВЕТЫ ПО ИСПРАВЛЕНИЮ ==="
+          echo "1. Проблема: Конфликт Kivy и webview"
+          echo "   Решение: Используйте 'sdl2' bootstrap с Kivy"
+          echo "2. Проблема: Python версия"
+          echo "   Решение: Не указывайте P4A_PYTHON_VERSION"
+          echo "3. Проблема: Сложные зависимости"
+          echo "   Решение: Начните с 'python3' только, потом добавляйте"
           
           exit 1
         fi
@@ -305,12 +256,13 @@ jobs:
         name: wave-defender-apk
         path: bin/*.apk
         
-    - name: Upload logs on failure
+    - name: Upload debug info if failed
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-failure-logs
+        name: debug-info
         path: |
           build.log
           alt_build.log
-          .buildozer/
+          buildozer.spec
+          main.py
