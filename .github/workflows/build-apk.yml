@@ -27,6 +27,7 @@ jobs:
         run: |
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_FORCE_ACCEPT_LICENSES=YES" >> $GITHUB_ENV
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
 
@@ -56,7 +57,7 @@ jobs:
       - name: Build APK
         run: |
           buildozer android clean || true
-          buildozer android debug --sdk_path $HOME/android-sdk
+          buildozer android debug --sdk_path $HOME/android-sdk --ignore-licenses
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

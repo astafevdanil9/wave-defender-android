@@ -21,3 +21,4 @@ android.ndk_path =
 [buildozer]
 warn_on_root = 0
 log_level = 2
+android.accept_sdk_license = True
