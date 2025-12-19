@@ -55,6 +55,16 @@ jobs:
         # Используем ТОЛЬКО современные cmdline-tools
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
+        echo "=== 3. Создаем симлинк для совместимости ==="
+        # КРИТИЧЕСКИ ВАЖНО: создаем директорию tools/bin и симлинк
+        mkdir -p $ANDROID_SDK_ROOT/tools/bin
+        ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager $ANDROID_SDK_ROOT/tools/bin/sdkmanager
+        
+        echo "Проверяем симлинк:"
+        ls -la $ANDROID_SDK_ROOT/tools/bin/sdkmanager
+        echo "Реальный путь:"
+        readlink -f $ANDROID_SDK_ROOT/tools/bin/sdkmanager || echo "Не симлинк"
+
         echo "=== Принимаем лицензии ==="
         # Создаем файлы лицензий вручную (гарантированно работает)
         mkdir -p $ANDROID_SDK_ROOT/licenses
