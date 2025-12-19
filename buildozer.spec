@@ -2,14 +2,10 @@
 title = Wave Defender
 package.name = wavedefender
 package.domain = com.astafevdanil9
-
-source.dir = .
-source.main = main.py\
 version = 1.0.0
-
-
+source.dir = .
+source.main = main.py
 requirements = python3==3.10,kivy==2.2.1,pygame
-
 android.archs = arm64-v8a
 
 [android]
